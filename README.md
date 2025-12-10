@@ -59,13 +59,13 @@ DuckDB is an embedded analytical database that excels at:
 ### Method 2: Manual Installation
 
 1. Download the component folders
-2. Copy each component folder to your Talend custom components directory:
+2. Copy each component folder to your Talend Exchange folder:
    ```
    # Windows
-   %USERPROFILE%\TOS_DI-[version]\plugins\org.talend.designer.components.localprovider_[version]\components\
+   TOS_DI-[version]\plugins\org.talend.designer.components.exchange_[version]\Downloaded\
    
    # macOS/Linux
-   ~/TOS_DI-[version]/plugins/org.talend.designer.components.localprovider_[version]/components/
+   TOS_DI-[version]/plugins/org.talend.designer.components.exchange_[version]/Downloaded/
    ```
 3. Restart Talend Studio
 4. Components appear in the **Databases > DuckDB** palette category
