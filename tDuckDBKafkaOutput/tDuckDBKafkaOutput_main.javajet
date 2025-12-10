@@ -1,0 +1,143 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String messageFormat = ElementParameterParser.getValue(node, "__MESSAGE_FORMAT__");
+String keyColumn = ElementParameterParser.getValue(node, "__KEY_COLUMN__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+String inConnName = null;
+if (inConns != null && inConns.size() > 0) {
+	IConnection conn = inConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		inConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+String outConnName = null;
+if (outConns != null && outConns.size() > 0) {
+	IConnection conn = outConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		outConnName = conn.getName();
+	}
+}
+%>
+
+<% if (inConnName != null) { %>
+	nb_line_<%=cid%>++;
+	
+	String messageKey_<%=cid%> = null;
+	String messageValue_<%=cid%> = null;
+	
+	<% if (keyColumn != null && !keyColumn.isEmpty()) { %>
+	if (<%=inConnName%>.<%=keyColumn%> != null) {
+		messageKey_<%=cid%> = String.valueOf(<%=inConnName%>.<%=keyColumn%>);
+	}
+	<% } %>
+	
+	<% if ("JSON".equals(messageFormat)) { %>
+	org.json.JSONObject jsonObj_<%=cid%> = new org.json.JSONObject();
+	<%
+	if (columns != null) {
+		for (IMetadataColumn col : columns) {
+			String colName = col.getLabel();
+			String colType = col.getTalendType();
+	%>
+	if (<%=inConnName%>.<%=colName%> != null) {
+		<% if (colType.equals("id_Date")) { %>
+		jsonObj_<%=cid%>.put("<%=colName%>", new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").format(<%=inConnName%>.<%=colName%>));
+		<% } else if (colType.equals("id_byte[]")) { %>
+		jsonObj_<%=cid%>.put("<%=colName%>", java.util.Base64.getEncoder().encodeToString(<%=inConnName%>.<%=colName%>));
+		<% } else { %>
+		jsonObj_<%=cid%>.put("<%=colName%>", <%=inConnName%>.<%=colName%>);
+		<% } %>
+	} else {
+		jsonObj_<%=cid%>.put("<%=colName%>", org.json.JSONObject.NULL);
+	}
+	<%
+		}
+	}
+	%>
+	messageValue_<%=cid%> = jsonObj_<%=cid%>.toString();
+	
+	<% } else { %>
+	StringBuilder csvBuilder_<%=cid%> = new StringBuilder();
+	<%
+	if (columns != null) {
+		boolean first = true;
+		for (IMetadataColumn col : columns) {
+			String colName = col.getLabel();
+			String colType = col.getTalendType();
+			if (!first) {
+	%>
+	csvBuilder_<%=cid%>.append(",");
+	<%
+			}
+			first = false;
+	%>
+	if (<%=inConnName%>.<%=colName%> != null) {
+		<% if (colType.equals("id_String")) { %>
+		String val_<%=colName%>_<%=cid%> = String.valueOf(<%=inConnName%>.<%=colName%>);
+		if (val_<%=colName%>_<%=cid%>.contains(",") || val_<%=colName%>_<%=cid%>.contains("\"") || val_<%=colName%>_<%=cid%>.contains("\n")) {
+			csvBuilder_<%=cid%>.append("\"").append(val_<%=colName%>_<%=cid%>.replace("\"", "\"\"")).append("\"");
+		} else {
+			csvBuilder_<%=cid%>.append(val_<%=colName%>_<%=cid%>);
+		}
+		<% } else if (colType.equals("id_Date")) { %>
+		csvBuilder_<%=cid%>.append(new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss").format(<%=inConnName%>.<%=colName%>));
+		<% } else { %>
+		csvBuilder_<%=cid%>.append(<%=inConnName%>.<%=colName%>);
+		<% } %>
+	}
+	<%
+		}
+	}
+	%>
+	messageValue_<%=cid%> = csvBuilder_<%=cid%>.toString();
+	<% } %>
+	
+	org.apache.kafka.clients.producer.ProducerRecord<String, String> record_<%=cid%> = 
+		new org.apache.kafka.clients.producer.ProducerRecord<>(currentTopic_<%=cid%>, messageKey_<%=cid%>, messageValue_<%=cid%>);
+	
+	producer_<%=cid%>.send(record_<%=cid%>, new org.apache.kafka.clients.producer.Callback() {
+		@Override
+		public void onCompletion(org.apache.kafka.clients.producer.RecordMetadata metadata, Exception exception) {
+			if (exception != null) {
+				<% if (debugMode) { %>
+				System.err.println("[<%=cid%>] Failed to send message: " + exception.getMessage());
+				<% } %>
+			}
+		}
+	});
+	
+	<% if (debugMode) { %>
+	if (nb_line_<%=cid%> <= 5 || nb_line_<%=cid%> % 10000 == 0) {
+		System.out.println("[<%=cid%>] Sent message " + nb_line_<%=cid%> + " - Key: " + messageKey_<%=cid%>);
+	}
+	<% } %>
+	
+	<% if (outConnName != null) { %>
+	<%=outConnName%> = <%=inConnName%>;
+	<% } %>
+<% } %>
+

@@ -1,0 +1,182 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+		java.util.Map
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String useExistingConnection = ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__");
+String connection = ElementParameterParser.getValue(node, "__CONNECTION__");
+String bootstrapServers = ElementParameterParser.getValue(node, "__BOOTSTRAP_SERVERS__");
+String topic = ElementParameterParser.getValue(node, "__TOPIC__");
+String securityProtocol = ElementParameterParser.getValue(node, "__SECURITY_PROTOCOL__");
+String saslMechanism = ElementParameterParser.getValue(node, "__SASL_MECHANISM__");
+String saslUsername = ElementParameterParser.getValue(node, "__SASL_USERNAME__");
+String saslPassword = ElementParameterParser.getValue(node, "__SASL_PASSWORD__");
+String groupId = ElementParameterParser.getValue(node, "__GROUP_ID__");
+String autoOffsetReset = ElementParameterParser.getValue(node, "__AUTO_OFFSET_RESET__");
+String maxMessages = ElementParameterParser.getValue(node, "__MAX_MESSAGES__");
+String timeoutMs = ElementParameterParser.getValue(node, "__TIMEOUT_MS__");
+String messageFormat = ElementParameterParser.getValue(node, "__MESSAGE_FORMAT__");
+boolean includeMetadata = "true".equals(ElementParameterParser.getValue(node, "__INCLUDE_METADATA__"));
+
+String specificPartition = ElementParameterParser.getValue(node, "__SPECIFIC_PARTITION__");
+String specificOffset = ElementParameterParser.getValue(node, "__SPECIFIC_OFFSET__");
+String sslCaLocation = ElementParameterParser.getValue(node, "__SSL_CA_LOCATION__");
+String sslCertLocation = ElementParameterParser.getValue(node, "__SSL_CERT_LOCATION__");
+String sslKeyLocation = ElementParameterParser.getValue(node, "__SSL_KEY_LOCATION__");
+List<Map<String, String>> extraProps = (List<Map<String, String>>) ElementParameterParser.getObjectValue(node, "__EXTRA_KAFKA_PROPERTIES__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+String outConnName = null;
+if (outConns != null && outConns.size() > 0) {
+	IConnection conn = outConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		outConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+%>
+
+int nb_line_<%=cid%> = 0;
+String currentTopic_<%=cid%> = <%=topic%>;
+String errorMessage_<%=cid%> = null;
+
+java.sql.Connection duckConn_<%=cid%> = null;
+java.sql.ResultSet rs_<%=cid%> = null;
+
+try {
+	<% if ("true".equals(useExistingConnection)) { %>
+	duckConn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connection%>");
+	if (duckConn_<%=cid%> == null) {
+		throw new RuntimeException("No DuckDB Kafka connection found from <%=connection%>");
+	}
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Using existing connection from <%=connection%>");
+	<% } %>
+	<% } else { %>
+	Class.forName("org.duckdb.DuckDBDriver");
+	duckConn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Created in-memory DuckDB connection");
+	<% } %>
+	<% } %>
+
+	java.sql.Statement setupStmt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+	
+	<% if (!"true".equals(useExistingConnection)) { %>
+	setupStmt_<%=cid%>.execute("INSTALL tributary FROM community");
+	setupStmt_<%=cid%>.execute("LOAD tributary");
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Tributary extension loaded");
+	<% } %>
+	<% } %>
+
+	StringBuilder kafkaQuery_<%=cid%> = new StringBuilder();
+	kafkaQuery_<%=cid%>.append("SELECT * FROM tributary_scan_topic(");
+	kafkaQuery_<%=cid%>.append(<%=topic%>);
+	
+	<% if ("true".equals(useExistingConnection)) { %>
+	String bootServers_<%=cid%> = (String) globalMap.get("bootstrap_servers_<%=connection%>");
+	kafkaQuery_<%=cid%>.append(", \"bootstrap.servers\" := '").append(bootServers_<%=cid%>).append("'");
+	
+	String secProto_<%=cid%> = (String) globalMap.get("security_protocol_<%=connection%>");
+	if (secProto_<%=cid%> != null && !secProto_<%=cid%>.isEmpty()) {
+		kafkaQuery_<%=cid%>.append(", \"security.protocol\" := '").append(secProto_<%=cid%>).append("'");
+	}
+	
+	String saslMech_<%=cid%> = (String) globalMap.get("sasl_mechanism_<%=connection%>");
+	if (saslMech_<%=cid%> != null && !saslMech_<%=cid%>.isEmpty()) {
+		kafkaQuery_<%=cid%>.append(", \"sasl.mechanisms\" := '").append(saslMech_<%=cid%>).append("'");
+	}
+	
+	String saslUser_<%=cid%> = (String) globalMap.get("sasl_username_<%=connection%>");
+	String saslPass_<%=cid%> = (String) globalMap.get("sasl_password_<%=connection%>");
+	if (saslUser_<%=cid%> != null && !saslUser_<%=cid%>.isEmpty()) {
+		kafkaQuery_<%=cid%>.append(", \"sasl.username\" := '").append(saslUser_<%=cid%>).append("'");
+		kafkaQuery_<%=cid%>.append(", \"sasl.password\" := '").append(saslPass_<%=cid%>).append("'");
+	}
+	<% } else { %>
+	kafkaQuery_<%=cid%>.append(", \"bootstrap.servers\" := '").append(<%=bootstrapServers%>).append("'");
+	
+	<% if (!"PLAINTEXT".equals(securityProtocol)) { %>
+	kafkaQuery_<%=cid%>.append(", \"security.protocol\" := '<%=securityProtocol%>'");
+	<% } %>
+	
+	<% if ("SASL_PLAINTEXT".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	kafkaQuery_<%=cid%>.append(", \"sasl.mechanisms\" := '<%=saslMechanism%>'");
+	kafkaQuery_<%=cid%>.append(", \"sasl.username\" := '").append(<%=saslUsername%>).append("'");
+	kafkaQuery_<%=cid%>.append(", \"sasl.password\" := '").append(<%=saslPassword%>).append("'");
+	<% } %>
+	
+	<% if ("SSL".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	<% if (sslCaLocation != null && !sslCaLocation.isEmpty() && !sslCaLocation.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"ssl.ca.location\" := '").append(<%=sslCaLocation%>).append("'");
+	<% } %>
+	<% if (sslCertLocation != null && !sslCertLocation.isEmpty() && !sslCertLocation.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"ssl.certificate.location\" := '").append(<%=sslCertLocation%>).append("'");
+	<% } %>
+	<% if (sslKeyLocation != null && !sslKeyLocation.isEmpty() && !sslKeyLocation.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"ssl.key.location\" := '").append(<%=sslKeyLocation%>).append("'");
+	<% } %>
+	<% } %>
+	<% } %>
+	
+	<% if (groupId != null && !groupId.isEmpty() && !groupId.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"group.id\" := '").append(<%=groupId%>).append("'");
+	<% } %>
+	
+	kafkaQuery_<%=cid%>.append(", \"auto.offset.reset\" := '<%=autoOffsetReset%>'");
+	
+	<% if (specificPartition != null && !specificPartition.isEmpty() && !specificPartition.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"partition\" := ").append(<%=specificPartition%>);
+	<% } %>
+	
+	<% if (specificOffset != null && !specificOffset.isEmpty() && !specificOffset.equals("\"\"")) { %>
+	kafkaQuery_<%=cid%>.append(", \"offset\" := ").append(<%=specificOffset%>);
+	<% } %>
+	
+	<% if (extraProps != null && extraProps.size() > 0) { 
+		for (Map<String, String> prop : extraProps) {
+			String key = prop.get("PROPERTY_KEY");
+			String value = prop.get("PROPERTY_VALUE");
+			if (key != null && !key.isEmpty()) {
+	%>
+	kafkaQuery_<%=cid%>.append(", \"").append(<%=key%>).append("\" := '").append(<%=value%>).append("'");
+	<%		}
+		}
+	} %>
+	
+	kafkaQuery_<%=cid%>.append(")");
+	
+	<% if (maxMessages != null && !maxMessages.equals("\"-1\"") && !maxMessages.equals("-1")) { %>
+	kafkaQuery_<%=cid%>.append(" LIMIT ").append(<%=maxMessages%>);
+	<% } %>
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Executing Kafka query: " + kafkaQuery_<%=cid%>.toString());
+	<% } %>
+	
+	java.sql.Statement queryStmt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+	<% if (timeoutMs != null && !timeoutMs.isEmpty()) { %>
+	queryStmt_<%=cid%>.setQueryTimeout(Integer.parseInt(<%=timeoutMs%>) / 1000);
+	<% } %>
+	
+	rs_<%=cid%> = queryStmt_<%=cid%>.executeQuery(kafkaQuery_<%=cid%>.toString());
+

@@ -1,0 +1,116 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.EConnectionType
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+" 
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+boolean useCache = "true".equals(ElementParameterParser.getValue(node, "__USE_CACHE__"));
+String cacheTtl = ElementParameterParser.getValue(node, "__CACHE_TTL_SECONDS__");
+String cacheKey = ElementParameterParser.getValue(node, "__CACHE_KEY__");
+
+List<IMetadataColumn> outColumns = null;
+String outConnName = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null) {
+    for(IConnection conn : outConns) {
+        if(conn.getLineStyle().equals(EConnectionType.FLOW_MAIN)) {
+            outConnName = conn.getName();
+            IMetadataTable metadata = conn.getMetadataTable();
+            outColumns = metadata.getListColumns();
+            break;
+        }
+    }
+}
+
+boolean hasOutput = outConnName != null && outColumns != null && outColumns.size() > 0;
+%>
+
+try {
+    java.sql.ResultSet rs_end_<%=cid%> = (java.sql.ResultSet) globalMap.get("rs_<%=cid%>");
+    java.sql.Statement querySt_end_<%=cid%> = (java.sql.Statement) globalMap.get("querySt_<%=cid%>");
+    String tempFile_end_<%=cid%> = (String) globalMap.get("tempFile_<%=cid%>");
+    
+    if(rs_end_<%=cid%> != null) {
+        try { rs_end_<%=cid%>.close(); } catch(Exception e) {}
+    }
+    if(querySt_end_<%=cid%> != null) {
+        try { querySt_end_<%=cid%>.close(); } catch(Exception e) {}
+    }
+    
+<%if(useCache) {%>
+    if(!cache_hit_<%=cid%> && nb_line_<%=cid%> > 0) {
+        String cacheKey_end_<%=cid%> = <%=cacheKey%>;
+        if(cacheKey_end_<%=cid%> != null && !cacheKey_end_<%=cid%>.isEmpty()) {
+            try {
+                java.sql.Statement cacheSt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+                cacheSt_<%=cid%>.execute("CREATE TABLE IF NOT EXISTS api_cache (" +
+                    "cache_key VARCHAR PRIMARY KEY, " +
+                    "cached_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
+                    "ttl_seconds INTEGER, " +
+                    "row_count INTEGER" +
+                ")");
+                
+                cacheSt_<%=cid%>.execute("INSERT OR REPLACE INTO api_cache (cache_key, ttl_seconds, row_count) VALUES ('" +
+                    cacheKey_end_<%=cid%>.replace("'", "''") + "', " + <%=cacheTtl%> + ", " + nb_line_<%=cid%> + ")");
+                    
+                if(debug_<%=cid%>) System.out.println("[<%=cid%>] Cache updated: " + cacheKey_end_<%=cid%>);
+                cacheSt_<%=cid%>.close();
+            } catch(Exception cacheEx) {
+                if(debug_<%=cid%>) System.err.println("[<%=cid%>] Cache update failed: " + cacheEx.getMessage());
+            }
+        }
+    }
+<%}%>
+
+    if(tempFile_end_<%=cid%> != null) {
+        try {
+            java.io.File tempF_<%=cid%> = new java.io.File(tempFile_end_<%=cid%>);
+            if(tempF_<%=cid%>.exists()) {
+                tempF_<%=cid%>.delete();
+                if(debug_<%=cid%>) System.out.println("[<%=cid%>] Temp file deleted: " + tempFile_end_<%=cid%>);
+            }
+        } catch(Exception e) {}
+    }
+    
+    if(duckConn_<%=cid%> != null) {
+        try { duckConn_<%=cid%>.close(); } catch(Exception e) {}
+    }
+    if(httpClient_<%=cid%> != null) {
+        try { httpClient_<%=cid%>.close(); } catch(Exception e) {}
+    }
+    
+} catch(Exception finalEx_<%=cid%>) {
+    System.err.println("[<%=cid%>] Cleanup error: " + finalEx_<%=cid%>.getMessage());
+}
+
+long totalTime_<%=cid%> = System.currentTimeMillis() - startTime_<%=cid%>;
+
+globalMap.put("<%=cid%>_NB_LINE", nb_line_<%=cid%>);
+globalMap.put("<%=cid%>_NB_API_CALLS", nb_api_calls_<%=cid%>);
+globalMap.put("<%=cid%>_NB_PAGES", nb_pages_<%=cid%>);
+globalMap.put("<%=cid%>_TOTAL_RESPONSE_SIZE", total_response_size_<%=cid%>);
+globalMap.put("<%=cid%>_PROCESSING_TIME_MS", totalTime_<%=cid%>);
+globalMap.put("<%=cid%>_CACHE_HIT", cache_hit_<%=cid%>);
+globalMap.put("<%=cid%>_NB_ERRORS", nb_errors_<%=cid%>);
+
+if(debug_<%=cid%>) {
+    System.out.println("[<%=cid%>] === tDuckDBRestInput Summary ===");
+    System.out.println("[<%=cid%>] Output rows:       " + nb_line_<%=cid%>);
+    System.out.println("[<%=cid%>] API calls:         " + nb_api_calls_<%=cid%>);
+    System.out.println("[<%=cid%>] Pages fetched:     " + nb_pages_<%=cid%>);
+    System.out.println("[<%=cid%>] Total response:    " + total_response_size_<%=cid%> + " bytes");
+    System.out.println("[<%=cid%>] Processing time:   " + totalTime_<%=cid%> + "ms");
+    System.out.println("[<%=cid%>] Cache hit:         " + cache_hit_<%=cid%>);
+    System.out.println("[<%=cid%>] Errors:            " + nb_errors_<%=cid%>);
+}

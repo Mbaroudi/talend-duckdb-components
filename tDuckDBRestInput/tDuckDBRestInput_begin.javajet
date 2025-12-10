@@ -1,0 +1,390 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.EConnectionType
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+    java.util.Map
+    java.util.Base64
+" 
+%>
+<% 
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String apiUrl = ElementParameterParser.getValue(node, "__API_URL__");
+String responseFormat = ElementParameterParser.getValue(node, "__RESPONSE_FORMAT__");
+String jsonPath = ElementParameterParser.getValue(node, "__JSON_PATH__");
+
+boolean useAuth = "true".equals(ElementParameterParser.getValue(node, "__USE_AUTHENTICATION__"));
+String authType = ElementParameterParser.getValue(node, "__AUTH_TYPE__");
+String bearerToken = ElementParameterParser.getValue(node, "__BEARER_TOKEN__");
+String basicUsername = ElementParameterParser.getValue(node, "__BASIC_USERNAME__");
+String basicPassword = ElementParameterParser.getValue(node, "__BASIC_PASSWORD__");
+String apiKeyHeader = ElementParameterParser.getValue(node, "__API_KEY_HEADER__");
+String apiKeyValue = ElementParameterParser.getValue(node, "__API_KEY_VALUE__");
+String oauth2TokenUrl = ElementParameterParser.getValue(node, "__OAUTH2_TOKEN_URL__");
+String oauth2ClientId = ElementParameterParser.getValue(node, "__OAUTH2_CLIENT_ID__");
+String oauth2ClientSecret = ElementParameterParser.getValue(node, "__OAUTH2_CLIENT_SECRET__");
+
+List<Map<String, String>> customHeaders = (List<Map<String,String>>)ElementParameterParser.getObjectValue(node, "__CUSTOM_HEADERS__");
+
+boolean useCache = "true".equals(ElementParameterParser.getValue(node, "__USE_CACHE__"));
+String cacheTtl = ElementParameterParser.getValue(node, "__CACHE_TTL_SECONDS__");
+String cacheKey = ElementParameterParser.getValue(node, "__CACHE_KEY__");
+
+boolean usePagination = "true".equals(ElementParameterParser.getValue(node, "__USE_PAGINATION__"));
+String paginationType = ElementParameterParser.getValue(node, "__PAGINATION_TYPE__");
+String pageSize = ElementParameterParser.getValue(node, "__PAGE_SIZE__");
+String maxPages = ElementParameterParser.getValue(node, "__MAX_PAGES__");
+String offsetParam = ElementParameterParser.getValue(node, "__OFFSET_PARAM__");
+String limitParam = ElementParameterParser.getValue(node, "__LIMIT_PARAM__");
+String pageParam = ElementParameterParser.getValue(node, "__PAGE_PARAM__");
+String perPageParam = ElementParameterParser.getValue(node, "__PER_PAGE_PARAM__");
+String cursorParam = ElementParameterParser.getValue(node, "__CURSOR_PARAM__");
+String cursorJsonPath = ElementParameterParser.getValue(node, "__CURSOR_JSON_PATH__");
+
+String postSql = ElementParameterParser.getValue(node, "__POST_SQL__");
+
+String timeout = ElementParameterParser.getValue(node, "__TIMEOUT_SECONDS__");
+String retryCount = ElementParameterParser.getValue(node, "__RETRY_COUNT__");
+String retryDelay = ElementParameterParser.getValue(node, "__RETRY_DELAY_MS__");
+String userAgent = ElementParameterParser.getValue(node, "__USER_AGENT__");
+
+String memoryLimit = ElementParameterParser.getValue(node, "__MEMORY_LIMIT__");
+String threads = ElementParameterParser.getValue(node, "__THREADS__");
+
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+boolean logResponse = "true".equals(ElementParameterParser.getValue(node, "__LOG_RESPONSE__"));
+boolean saveRawResponse = "true".equals(ElementParameterParser.getValue(node, "__SAVE_RAW_RESPONSE__"));
+String rawResponsePath = ElementParameterParser.getValue(node, "__RAW_RESPONSE_PATH__");
+
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+
+List<IMetadataColumn> outColumns = null;
+String outConnName = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null) {
+    for(IConnection conn : outConns) {
+        if(conn.getLineStyle().equals(EConnectionType.FLOW_MAIN)) {
+            outConnName = conn.getName();
+            IMetadataTable metadata = conn.getMetadataTable();
+            outColumns = metadata.getListColumns();
+            break;
+        }
+    }
+}
+
+String b64PostSql = Base64.getEncoder().encodeToString(postSql.replace("\"", "'").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+%>
+
+long startTime_<%=cid%> = System.currentTimeMillis();
+int nb_line_<%=cid%> = 0;
+int nb_api_calls_<%=cid%> = 0;
+int nb_pages_<%=cid%> = 0;
+long total_response_size_<%=cid%> = 0;
+int nb_errors_<%=cid%> = 0;
+boolean cache_hit_<%=cid%> = false;
+
+boolean debug_<%=cid%> = <%=debugMode%>;
+boolean logResponse_<%=cid%> = <%=logResponse%>;
+boolean dieOnError_<%=cid%> = <%=dieOnError%>;
+
+java.sql.Connection duckConn_<%=cid%> = null;
+org.apache.http.impl.client.CloseableHttpClient httpClient_<%=cid%> = null;
+java.util.List<Object[]> results_<%=cid%> = new java.util.ArrayList();
+
+try {
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Initializing tDuckDBRestInput...");
+    
+    Class.forName("org.duckdb.DuckDBDriver");
+    duckConn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+    java.sql.Statement initSt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+    
+    String memLimit_<%=cid%> = <%=memoryLimit%>;
+    if(memLimit_<%=cid%> != null && !memLimit_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET memory_limit='" + memLimit_<%=cid%> + "'");
+    }
+    
+    int threadCount_<%=cid%> = <%=threads%>;
+    if(threadCount_<%=cid%> > 0) {
+        initSt_<%=cid%>.execute("SET threads=" + threadCount_<%=cid%>);
+    }
+    
+    try { initSt_<%=cid%>.execute("INSTALL httpfs"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD httpfs");
+    
+    initSt_<%=cid%>.close();
+    
+    int timeoutMs_<%=cid%> = <%=timeout%> * 1000;
+    org.apache.http.client.config.RequestConfig requestConfig_<%=cid%> = org.apache.http.client.config.RequestConfig.custom()
+        .setConnectTimeout(timeoutMs_<%=cid%>)
+        .setSocketTimeout(timeoutMs_<%=cid%>)
+        .setConnectionRequestTimeout(timeoutMs_<%=cid%>)
+        .build();
+    
+    httpClient_<%=cid%> = org.apache.http.impl.client.HttpClients.custom()
+        .setDefaultRequestConfig(requestConfig_<%=cid%>)
+        .build();
+    
+    String authHeader_<%=cid%> = null;
+    
+<%if(useAuth) {%>
+    <%if("BEARER".equals(authType)) {%>
+    authHeader_<%=cid%> = "Bearer " + <%=bearerToken%>;
+    <%} else if("BASIC".equals(authType)) {%>
+    String credentials_<%=cid%> = <%=basicUsername%> + ":" + <%=basicPassword%>;
+    authHeader_<%=cid%> = "Basic " + java.util.Base64.getEncoder().encodeToString(credentials_<%=cid%>.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    <%} else if("OAUTH2_CLIENT".equals(authType)) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Fetching OAuth2 token...");
+    org.apache.http.client.methods.HttpPost tokenPost_<%=cid%> = new org.apache.http.client.methods.HttpPost(<%=oauth2TokenUrl%>);
+    tokenPost_<%=cid%>.setHeader("Content-Type", "application/x-www-form-urlencoded");
+    String tokenBody_<%=cid%> = "grant_type=client_credentials" +
+        "&client_id=" + java.net.URLEncoder.encode(<%=oauth2ClientId%>, "UTF-8") +
+        "&client_secret=" + java.net.URLEncoder.encode(<%=oauth2ClientSecret%>, "UTF-8");
+    tokenPost_<%=cid%>.setEntity(new org.apache.http.entity.StringEntity(tokenBody_<%=cid%>));
+    
+    org.apache.http.client.methods.CloseableHttpResponse tokenResp_<%=cid%> = httpClient_<%=cid%>.execute(tokenPost_<%=cid%>);
+    String tokenJson_<%=cid%> = org.apache.http.util.EntityUtils.toString(tokenResp_<%=cid%>.getEntity());
+    tokenResp_<%=cid%>.close();
+    
+    com.google.gson.JsonObject tokenObj_<%=cid%> = com.google.gson.JsonParser.parseString(tokenJson_<%=cid%>).getAsJsonObject();
+    String accessToken_<%=cid%> = tokenObj_<%=cid%>.has("access_token") ? tokenObj_<%=cid%>.get("access_token").getAsString() : 
+                                  tokenObj_<%=cid%>.has("token") ? tokenObj_<%=cid%>.get("token").getAsString() : null;
+    if(accessToken_<%=cid%> != null) {
+        authHeader_<%=cid%> = "Bearer " + accessToken_<%=cid%>;
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] OAuth2 token obtained");
+    }
+    <%}%>
+<%}%>
+
+    String baseUrl_<%=cid%> = <%=apiUrl%>;
+    String responseFormat_<%=cid%> = "<%=responseFormat%>";
+    boolean usePagination_<%=cid%> = <%=usePagination%>;
+    int pageSize_<%=cid%> = <%=pageSize%>;
+    int maxPages_<%=cid%> = <%=maxPages%>;
+    int retryCount_<%=cid%> = <%=retryCount%>;
+    long retryDelay_<%=cid%> = <%=retryDelay%>;
+    
+    boolean hasMore_<%=cid%> = true;
+    int currentPage_<%=cid%> = 1;
+    int currentOffset_<%=cid%> = 0;
+    String cursor_<%=cid%> = null;
+    
+    StringBuilder allData_<%=cid%> = new StringBuilder();
+    boolean isFirstPage_<%=cid%> = true;
+    
+    while(hasMore_<%=cid%>) {
+        StringBuilder urlBuilder_<%=cid%> = new StringBuilder(baseUrl_<%=cid%>);
+        
+        if(usePagination_<%=cid%>) {
+            String separator = baseUrl_<%=cid%>.contains("?") ? "&" : "?";
+            
+            <%if("OFFSET".equals(paginationType)) {%>
+            urlBuilder_<%=cid%>.append(separator).append(<%=offsetParam%>).append("=").append(currentOffset_<%=cid%>);
+            urlBuilder_<%=cid%>.append("&").append(<%=limitParam%>).append("=").append(pageSize_<%=cid%>);
+            <%} else if("PAGE".equals(paginationType)) {%>
+            urlBuilder_<%=cid%>.append(separator).append(<%=pageParam%>).append("=").append(currentPage_<%=cid%>);
+            urlBuilder_<%=cid%>.append("&").append(<%=perPageParam%>).append("=").append(pageSize_<%=cid%>);
+            <%} else if("CURSOR".equals(paginationType)) {%>
+            if(cursor_<%=cid%> != null) {
+                urlBuilder_<%=cid%>.append(separator).append(<%=cursorParam%>).append("=").append(cursor_<%=cid%>);
+            }
+            <%}%>
+        }
+        
+        String requestUrl_<%=cid%> = urlBuilder_<%=cid%>.toString();
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Fetching: " + requestUrl_<%=cid%>);
+        
+        String responseBody_<%=cid%> = null;
+        int statusCode_<%=cid%> = 0;
+        
+        for(int retry = 0; retry <= retryCount_<%=cid%>; retry++) {
+            try {
+                org.apache.http.client.methods.HttpGet get_<%=cid%> = new org.apache.http.client.methods.HttpGet(requestUrl_<%=cid%>);
+                get_<%=cid%>.setHeader("Accept", "application/json");
+                get_<%=cid%>.setHeader("User-Agent", <%=userAgent%>);
+                
+                if(authHeader_<%=cid%> != null) {
+                    get_<%=cid%>.setHeader("Authorization", authHeader_<%=cid%>);
+                }
+                
+                <%if("API_KEY".equals(authType) && useAuth) {%>
+                get_<%=cid%>.setHeader(<%=apiKeyHeader%>, <%=apiKeyValue%>);
+                <%}%>
+                
+                <%if(customHeaders != null) {
+                    for(Map<String, String> header : customHeaders) {
+                        String headerName = header.get("HEADER_NAME");
+                        String headerValue = header.get("HEADER_VALUE");
+                        if(headerName != null && !headerName.isEmpty()) {%>
+                get_<%=cid%>.setHeader(<%=headerName%>, <%=headerValue%>);
+                        <%}
+                    }
+                }%>
+                
+                org.apache.http.client.methods.CloseableHttpResponse resp_<%=cid%> = httpClient_<%=cid%>.execute(get_<%=cid%>);
+                statusCode_<%=cid%> = resp_<%=cid%>.getStatusLine().getStatusCode();
+                responseBody_<%=cid%> = org.apache.http.util.EntityUtils.toString(resp_<%=cid%>.getEntity(), "UTF-8");
+                resp_<%=cid%>.close();
+                nb_api_calls_<%=cid%>++;
+                
+                if(statusCode_<%=cid%> >= 200 && statusCode_<%=cid%> < 300) {
+                    break;
+                } else if(statusCode_<%=cid%> == 429 || statusCode_<%=cid%> >= 500) {
+                    if(retry < retryCount_<%=cid%>) {
+                        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Retry " + (retry+1) + " after " + retryDelay_<%=cid%> + "ms");
+                        Thread.sleep(retryDelay_<%=cid%> * (retry + 1));
+                    }
+                } else {
+                    break;
+                }
+            } catch(Exception e) {
+                if(retry == retryCount_<%=cid%>) throw e;
+                Thread.sleep(retryDelay_<%=cid%> * (retry + 1));
+            }
+        }
+        
+        if(statusCode_<%=cid%> < 200 || statusCode_<%=cid%> >= 300) {
+            throw new RuntimeException("API Error: " + statusCode_<%=cid%> + " - " + responseBody_<%=cid%>);
+        }
+        
+        total_response_size_<%=cid%> += responseBody_<%=cid%>.length();
+        nb_pages_<%=cid%>++;
+        
+        if(logResponse_<%=cid%> && debug_<%=cid%>) {
+            System.out.println("[<%=cid%>] Response (" + responseBody_<%=cid%>.length() + " bytes): " + 
+                (responseBody_<%=cid%>.length() > 500 ? responseBody_<%=cid%>.substring(0, 500) + "..." : responseBody_<%=cid%>));
+        }
+        
+<%if(saveRawResponse) {%>
+        String rawPath_<%=cid%> = <%=rawResponsePath%>;
+        if(rawPath_<%=cid%> != null && !rawPath_<%=cid%>.isEmpty()) {
+            org.apache.commons.io.FileUtils.writeStringToFile(
+                new java.io.File(rawPath_<%=cid%> + "_page" + nb_pages_<%=cid%> + ".json"), 
+                responseBody_<%=cid%>, "UTF-8");
+        }
+<%}%>
+
+        if("JSON".equals(responseFormat_<%=cid%>) || "NDJSON".equals(responseFormat_<%=cid%>)) {
+            if(isFirstPage_<%=cid%>) {
+                allData_<%=cid%>.append(responseBody_<%=cid%>);
+                isFirstPage_<%=cid%> = false;
+            } else {
+                com.google.gson.JsonElement newData = com.google.gson.JsonParser.parseString(responseBody_<%=cid%>);
+                if(newData.isJsonArray()) {
+                    String existing = allData_<%=cid%>.toString();
+                    if(existing.endsWith("]")) {
+                        allData_<%=cid%> = new StringBuilder(existing.substring(0, existing.length() - 1));
+                        allData_<%=cid%>.append(",");
+                        String newArray = newData.toString();
+                        allData_<%=cid%>.append(newArray.substring(1));
+                    }
+                }
+            }
+        }
+        
+        if(usePagination_<%=cid%>) {
+            com.google.gson.JsonElement parsed = com.google.gson.JsonParser.parseString(responseBody_<%=cid%>);
+            
+            <%if("CURSOR".equals(paginationType)) {%>
+            String cursorPath_<%=cid%> = <%=cursorJsonPath%>;
+            cursor_<%=cid%> = null;
+            if(parsed.isJsonObject()) {
+                com.google.gson.JsonObject obj = parsed.getAsJsonObject();
+                String[] pathParts = cursorPath_<%=cid%>.replace("$.", "").split("\\.");
+                com.google.gson.JsonElement current = obj;
+                for(String part : pathParts) {
+                    if(current != null && current.isJsonObject() && current.getAsJsonObject().has(part)) {
+                        current = current.getAsJsonObject().get(part);
+                    } else {
+                        current = null;
+                        break;
+                    }
+                }
+                if(current != null && !current.isJsonNull()) {
+                    cursor_<%=cid%> = current.getAsString();
+                }
+            }
+            hasMore_<%=cid%> = cursor_<%=cid%> != null && !cursor_<%=cid%>.isEmpty();
+            <%} else {%>
+            int dataCount = 0;
+            if(parsed.isJsonArray()) {
+                dataCount = parsed.getAsJsonArray().size();
+            } else if(parsed.isJsonObject()) {
+                com.google.gson.JsonObject obj = parsed.getAsJsonObject();
+                if(obj.has("data") && obj.get("data").isJsonArray()) {
+                    dataCount = obj.getAsJsonArray("data").size();
+                } else if(obj.has("results") && obj.get("results").isJsonArray()) {
+                    dataCount = obj.getAsJsonArray("results").size();
+                } else if(obj.has("items") && obj.get("items").isJsonArray()) {
+                    dataCount = obj.getAsJsonArray("items").size();
+                }
+            }
+            hasMore_<%=cid%> = dataCount >= pageSize_<%=cid%>;
+            <%}%>
+            
+            currentPage_<%=cid%>++;
+            currentOffset_<%=cid%> += pageSize_<%=cid%>;
+            
+            if(maxPages_<%=cid%> > 0 && nb_pages_<%=cid%> >= maxPages_<%=cid%>) {
+                hasMore_<%=cid%> = false;
+            }
+        } else {
+            hasMore_<%=cid%> = false;
+        }
+    }
+    
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Total pages: " + nb_pages_<%=cid%> + ", API calls: " + nb_api_calls_<%=cid%>);
+
+    String tempFile_<%=cid%> = System.getProperty("java.io.tmpdir") + "/duckdb_rest_" + System.currentTimeMillis() + ".json";
+    org.apache.commons.io.FileUtils.writeStringToFile(new java.io.File(tempFile_<%=cid%>), allData_<%=cid%>.toString(), "UTF-8");
+    
+    java.sql.Statement querySt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+    
+    String readFunc_<%=cid%> = "JSON".equals(responseFormat_<%=cid%>) ? "read_json_auto" : "read_ndjson_auto";
+    String createSql_<%=cid%> = "CREATE TABLE api_response AS SELECT * FROM " + readFunc_<%=cid%> + "('" + tempFile_<%=cid%> + "')";
+    
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading into DuckDB: " + createSql_<%=cid%>);
+    querySt_<%=cid%>.execute(createSql_<%=cid%>);
+    
+    rs_<%=cid%>.close();
+    
+    // Cleanup
+    String postSql_<%=cid%> = new String(java.util.Base64.getDecoder().decode("<%=b64PostSql%>"), java.nio.charset.StandardCharsets.UTF_8);
+    String finalQuery_<%=cid%> = "SELECT * FROM api_response";
+    if(postSql_<%=cid%> != null && !postSql_<%=cid%>.trim().isEmpty() && !postSql_<%=cid%>.trim().startsWith("--")) {
+        finalQuery_<%=cid%> = postSql_<%=cid%>;
+    }
+    
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Executing: " + finalQuery_<%=cid%>);
+    
+    java.sql.ResultSet rs_<%=cid%> = querySt_<%=cid%>.executeQuery(finalQuery_<%=cid%>);
+    java.sql.ResultSetMetaData rsMeta_<%=cid%> = rs_<%=cid%>.getMetaData();
+    int colCount_<%=cid%> = rsMeta_<%=cid%>.getColumnCount();
+    
+    java.util.Map<String, Integer> colIndexMap_<%=cid%> = new java.util.HashMap();
+    for(int i = 1; i <= colCount_<%=cid%>; i++) {
+        colIndexMap_<%=cid%>.put(rsMeta_<%=cid%>.getColumnName(i).toLowerCase(), i);
+    }
+    
+    globalMap.put("rs_<%=cid%>", rs_<%=cid%>);
+    globalMap.put("colIndexMap_<%=cid%>", colIndexMap_<%=cid%>);
+    globalMap.put("querySt_<%=cid%>", querySt_<%=cid%>);
+    globalMap.put("tempFile_<%=cid%>", tempFile_<%=cid%>);
+    
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Ready to iterate results");
+
+} catch(Exception e_<%=cid%>) {
+    nb_errors_<%=cid%>++;
+    System.err.println("[<%=cid%>] Error: " + e_<%=cid%>.getMessage());
+    e_<%=cid%>.printStackTrace();
+    if(dieOnError_<%=cid%>) {
+        throw new RuntimeException("[<%=cid%>] " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+    }
+}

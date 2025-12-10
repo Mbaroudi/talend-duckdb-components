@@ -1,0 +1,58 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+" 
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+boolean useExistingConn = "true".equals(ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__"));
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+String dataAction = ElementParameterParser.getValue(node, "__DATA_ACTION__");
+%>
+
+try {
+    if(useBatch_<%=cid%> && currentBatch_<%=cid%> > 0 && ps_<%=cid%> != null) {
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Executing final batch: " + currentBatch_<%=cid%> + " rows");
+        int[] results_<%=cid%> = ps_<%=cid%>.executeBatch();
+        for(int r : results_<%=cid%>) {
+            if(r >= 0 || r == java.sql.Statement.SUCCESS_NO_INFO) {
+<%if("INSERT".equals(dataAction) || "INSERT_OR_REPLACE".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {%>
+                nb_line_inserted_<%=cid%>++;
+<%} else if("UPDATE".equals(dataAction)) {%>
+                nb_line_updated_<%=cid%>++;
+<%} else if("DELETE".equals(dataAction)) {%>
+                nb_line_deleted_<%=cid%>++;
+<%}%>
+            }
+        }
+    }
+} catch(Exception e_final_<%=cid%>) {
+    System.err.println("[<%=cid%>] Final batch error: " + e_final_<%=cid%>.getMessage());
+<%if(dieOnError) {%>
+    throw new RuntimeException("[<%=cid%>] " + e_final_<%=cid%>.getMessage(), e_final_<%=cid%>);
+<%}%>
+} finally {
+    try { if(ps_<%=cid%> != null) ps_<%=cid%>.close(); } catch(Exception e) {}
+    try { if(stmt_<%=cid%> != null) stmt_<%=cid%>.close(); } catch(Exception e) {}
+<%if(!useExistingConn) {%>
+    try { if(ownConnection_<%=cid%> && conn_<%=cid%> != null) conn_<%=cid%>.close(); } catch(Exception e) {}
+<%}%>
+}
+
+if(debug_<%=cid%>) {
+    System.out.println("[<%=cid%>] === tDuckDBOutput Summary ===");
+    System.out.println("[<%=cid%>] Total rows processed: " + nb_line_<%=cid%>);
+    System.out.println("[<%=cid%>] Rows inserted: " + nb_line_inserted_<%=cid%>);
+    System.out.println("[<%=cid%>] Rows updated: " + nb_line_updated_<%=cid%>);
+    System.out.println("[<%=cid%>] Rows deleted: " + nb_line_deleted_<%=cid%>);
+}
+
+globalMap.put("<%=cid%>_NB_LINE", nb_line_<%=cid%>);
+globalMap.put("<%=cid%>_NB_LINE_INSERTED", nb_line_inserted_<%=cid%>);
+globalMap.put("<%=cid%>_NB_LINE_UPDATED", nb_line_updated_<%=cid%>);
+globalMap.put("<%=cid%>_NB_LINE_DELETED", nb_line_deleted_<%=cid%>);

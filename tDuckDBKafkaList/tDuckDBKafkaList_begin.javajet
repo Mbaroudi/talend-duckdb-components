@@ -1,0 +1,119 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String useExistingConnection = ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__");
+String connection = ElementParameterParser.getValue(node, "__CONNECTION__");
+String bootstrapServers = ElementParameterParser.getValue(node, "__BOOTSTRAP_SERVERS__");
+String securityProtocol = ElementParameterParser.getValue(node, "__SECURITY_PROTOCOL__");
+String saslMechanism = ElementParameterParser.getValue(node, "__SASL_MECHANISM__");
+String saslUsername = ElementParameterParser.getValue(node, "__SASL_USERNAME__");
+String saslPassword = ElementParameterParser.getValue(node, "__SASL_PASSWORD__");
+String outputType = ElementParameterParser.getValue(node, "__OUTPUT_TYPE__");
+String sslCaLocation = ElementParameterParser.getValue(node, "__SSL_CA_LOCATION__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+String outConnName = null;
+if (outConns != null && outConns.size() > 0) {
+	IConnection conn = outConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		outConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+%>
+
+int nb_topics_<%=cid%> = 0;
+int nb_brokers_<%=cid%> = 0;
+String errorMessage_<%=cid%> = null;
+
+java.sql.Connection duckConn_<%=cid%> = null;
+java.sql.ResultSet rs_<%=cid%> = null;
+
+try {
+	<% if ("true".equals(useExistingConnection)) { %>
+	duckConn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connection%>");
+	if (duckConn_<%=cid%> == null) {
+		throw new RuntimeException("No DuckDB Kafka connection found from <%=connection%>");
+	}
+	<% } else { %>
+	Class.forName("org.duckdb.DuckDBDriver");
+	duckConn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+	
+	java.sql.Statement setupStmt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+	setupStmt_<%=cid%>.execute("INSTALL tributary FROM community");
+	setupStmt_<%=cid%>.execute("LOAD tributary");
+	setupStmt_<%=cid%>.close();
+	<% } %>
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Querying Kafka metadata...");
+	<% } %>
+	
+	StringBuilder metadataQuery_<%=cid%> = new StringBuilder();
+	metadataQuery_<%=cid%>.append("SELECT * FROM tributary_metadata(");
+	
+	<% if ("true".equals(useExistingConnection)) { %>
+	String bootServers_<%=cid%> = (String) globalMap.get("bootstrap_servers_<%=connection%>");
+	metadataQuery_<%=cid%>.append("\"bootstrap.servers\" := '").append(bootServers_<%=cid%>).append("'");
+	
+	String secProto_<%=cid%> = (String) globalMap.get("security_protocol_<%=connection%>");
+	if (secProto_<%=cid%> != null && !secProto_<%=cid%>.isEmpty() && !"PLAINTEXT".equals(secProto_<%=cid%>)) {
+		metadataQuery_<%=cid%>.append(", \"security.protocol\" := '").append(secProto_<%=cid%>).append("'");
+	}
+	
+	String saslMech_<%=cid%> = (String) globalMap.get("sasl_mechanism_<%=connection%>");
+	if (saslMech_<%=cid%> != null && !saslMech_<%=cid%>.isEmpty()) {
+		metadataQuery_<%=cid%>.append(", \"sasl.mechanisms\" := '").append(saslMech_<%=cid%>).append("'");
+		String saslUser_<%=cid%> = (String) globalMap.get("sasl_username_<%=connection%>");
+		String saslPass_<%=cid%> = (String) globalMap.get("sasl_password_<%=connection%>");
+		metadataQuery_<%=cid%>.append(", \"sasl.username\" := '").append(saslUser_<%=cid%>).append("'");
+		metadataQuery_<%=cid%>.append(", \"sasl.password\" := '").append(saslPass_<%=cid%>).append("'");
+	}
+	<% } else { %>
+	metadataQuery_<%=cid%>.append("\"bootstrap.servers\" := '").append(<%=bootstrapServers%>).append("'");
+	
+	<% if (!"PLAINTEXT".equals(securityProtocol)) { %>
+	metadataQuery_<%=cid%>.append(", \"security.protocol\" := '<%=securityProtocol%>'");
+	<% } %>
+	
+	<% if ("SASL_PLAINTEXT".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	metadataQuery_<%=cid%>.append(", \"sasl.mechanisms\" := '<%=saslMechanism%>'");
+	metadataQuery_<%=cid%>.append(", \"sasl.username\" := '").append(<%=saslUsername%>).append("'");
+	metadataQuery_<%=cid%>.append(", \"sasl.password\" := '").append(<%=saslPassword%>).append("'");
+	<% } %>
+	
+	<% if ("SSL".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	<% if (sslCaLocation != null && !sslCaLocation.isEmpty() && !sslCaLocation.equals("\"\"")) { %>
+	metadataQuery_<%=cid%>.append(", \"ssl.ca.location\" := '").append(<%=sslCaLocation%>).append("'");
+	<% } %>
+	<% } %>
+	<% } %>
+	
+	metadataQuery_<%=cid%>.append(")");
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Metadata query: " + metadataQuery_<%=cid%>.toString());
+	<% } %>
+	
+	java.sql.Statement queryStmt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+	rs_<%=cid%> = queryStmt_<%=cid%>.executeQuery(metadataQuery_<%=cid%>.toString());
+

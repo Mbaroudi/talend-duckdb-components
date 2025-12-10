@@ -1,0 +1,231 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String messageFormat = ElementParameterParser.getValue(node, "__MESSAGE_FORMAT__");
+boolean includeMetadata = "true".equals(ElementParameterParser.getValue(node, "__INCLUDE_METADATA__"));
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+String outConnName = null;
+if (outConns != null && outConns.size() > 0) {
+	IConnection conn = outConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		outConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+%>
+
+	while (rs_<%=cid%>.next()) {
+		nb_line_<%=cid%>++;
+		
+		String kafkaTopic_<%=cid%> = rs_<%=cid%>.getString("topic");
+		int kafkaPartition_<%=cid%> = rs_<%=cid%>.getInt("partition");
+		long kafkaOffset_<%=cid%> = rs_<%=cid%>.getLong("offset");
+		String kafkaMessage_<%=cid%> = rs_<%=cid%>.getString("message");
+		
+		<% if (debugMode) { %>
+		if (nb_line_<%=cid%> <= 5) {
+			System.out.println("[<%=cid%>] Row " + nb_line_<%=cid%> + " - Topic: " + kafkaTopic_<%=cid%> + ", Partition: " + kafkaPartition_<%=cid%> + ", Offset: " + kafkaOffset_<%=cid%>);
+		}
+		<% } %>
+		
+		<% if (outConnName != null && columns != null) { %>
+		<%=outConnName%> = new <%=outConnName%>Struct();
+		
+		<% if ("JSON".equals(messageFormat)) { %>
+		org.json.JSONObject jsonMsg_<%=cid%> = null;
+		try {
+			jsonMsg_<%=cid%> = new org.json.JSONObject(kafkaMessage_<%=cid%>);
+		} catch (Exception e) {
+			<% if (debugMode) { %>
+			System.err.println("[<%=cid%>] Failed to parse JSON: " + e.getMessage());
+			<% } %>
+		}
+		
+		<%
+		for (IMetadataColumn col : columns) {
+			String colName = col.getLabel();
+			String colType = col.getTalendType();
+			
+			if (includeMetadata && (colName.equals("kafka_topic") || colName.equals("kafka_partition") || colName.equals("kafka_offset") || colName.equals("kafka_message"))) {
+				if (colName.equals("kafka_topic")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaTopic_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_partition")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaPartition_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_offset")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaOffset_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_message")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaMessage_<%=cid%>;
+		<%
+				}
+			} else {
+				if (colType.equals("id_String")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			<%=outConnName%>.<%=colName%> = jsonMsg_<%=cid%>.optString("<%=colName%>", null);
+		}
+		<%
+				} else if (colType.equals("id_Integer")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			<%=outConnName%>.<%=colName%> = jsonMsg_<%=cid%>.optInt("<%=colName%>", 0);
+		}
+		<%
+				} else if (colType.equals("id_Long")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			<%=outConnName%>.<%=colName%> = jsonMsg_<%=cid%>.optLong("<%=colName%>", 0L);
+		}
+		<%
+				} else if (colType.equals("id_Double") || colType.equals("id_Float")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			<%=outConnName%>.<%=colName%> = jsonMsg_<%=cid%>.optDouble("<%=colName%>", 0.0);
+		}
+		<%
+				} else if (colType.equals("id_Boolean")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			<%=outConnName%>.<%=colName%> = jsonMsg_<%=cid%>.optBoolean("<%=colName%>", false);
+		}
+		<%
+				} else if (colType.equals("id_Date")) {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			String dateStr_<%=colName%>_<%=cid%> = jsonMsg_<%=cid%>.optString("<%=colName%>", null);
+			if (dateStr_<%=colName%>_<%=cid%> != null) {
+				try {
+					<%=outConnName%>.<%=colName%> = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss").parse(dateStr_<%=colName%>_<%=cid%>);
+				} catch (Exception e) {
+					<%=outConnName%>.<%=colName%> = null;
+				}
+			}
+		}
+		<%
+				} else {
+		%>
+		if (jsonMsg_<%=cid%> != null && jsonMsg_<%=cid%>.has("<%=colName%>")) {
+			Object val_<%=colName%>_<%=cid%> = jsonMsg_<%=cid%>.opt("<%=colName%>");
+			<%=outConnName%>.<%=colName%> = val_<%=colName%>_<%=cid%> != null ? val_<%=colName%>_<%=cid%>.toString() : null;
+		}
+		<%
+				}
+			}
+		}
+		%>
+		
+		<% } else if ("CSV".equals(messageFormat)) { %>
+		String[] csvFields_<%=cid%> = kafkaMessage_<%=cid%>.split(",");
+		<%
+		int fieldIdx = 0;
+		for (IMetadataColumn col : columns) {
+			String colName = col.getLabel();
+			String colType = col.getTalendType();
+			
+			if (includeMetadata && (colName.equals("kafka_topic") || colName.equals("kafka_partition") || colName.equals("kafka_offset") || colName.equals("kafka_message"))) {
+				if (colName.equals("kafka_topic")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaTopic_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_partition")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaPartition_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_offset")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaOffset_<%=cid%>;
+		<%
+				} else if (colName.equals("kafka_message")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaMessage_<%=cid%>;
+		<%
+				}
+			} else {
+				if (colType.equals("id_String")) {
+		%>
+		if (csvFields_<%=cid%>.length > <%=fieldIdx%>) {
+			<%=outConnName%>.<%=colName%> = csvFields_<%=cid%>[<%=fieldIdx%>].trim();
+		}
+		<%
+				} else if (colType.equals("id_Integer")) {
+		%>
+		if (csvFields_<%=cid%>.length > <%=fieldIdx%>) {
+			try { <%=outConnName%>.<%=colName%> = Integer.parseInt(csvFields_<%=cid%>[<%=fieldIdx%>].trim()); } catch (Exception e) {}
+		}
+		<%
+				} else if (colType.equals("id_Long")) {
+		%>
+		if (csvFields_<%=cid%>.length > <%=fieldIdx%>) {
+			try { <%=outConnName%>.<%=colName%> = Long.parseLong(csvFields_<%=cid%>[<%=fieldIdx%>].trim()); } catch (Exception e) {}
+		}
+		<%
+				} else if (colType.equals("id_Double")) {
+		%>
+		if (csvFields_<%=cid%>.length > <%=fieldIdx%>) {
+			try { <%=outConnName%>.<%=colName%> = Double.parseDouble(csvFields_<%=cid%>[<%=fieldIdx%>].trim()); } catch (Exception e) {}
+		}
+		<%
+				} else {
+		%>
+		if (csvFields_<%=cid%>.length > <%=fieldIdx%>) {
+			<%=outConnName%>.<%=colName%> = csvFields_<%=cid%>[<%=fieldIdx%>].trim();
+		}
+		<%
+				}
+				fieldIdx++;
+			}
+		}
+		%>
+		
+		<% } else { %>
+		<%
+		for (IMetadataColumn col : columns) {
+			String colName = col.getLabel();
+			if (colName.equals("kafka_topic")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaTopic_<%=cid%>;
+		<%
+			} else if (colName.equals("kafka_partition")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaPartition_<%=cid%>;
+		<%
+			} else if (colName.equals("kafka_offset")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaOffset_<%=cid%>;
+		<%
+			} else if (colName.equals("kafka_message") || colName.equals("message")) {
+		%>
+		<%=outConnName%>.<%=colName%> = kafkaMessage_<%=cid%>;
+		<%
+			}
+		}
+		%>
+		<% } %>
+		<% } %>
+

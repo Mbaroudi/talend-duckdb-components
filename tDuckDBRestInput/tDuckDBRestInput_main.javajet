@@ -1,0 +1,95 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.EConnectionType
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+" 
+%>
+<% 
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+List<IMetadataColumn> outColumns = null;
+String outConnName = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null) {
+    for(IConnection conn : outConns) {
+        if(conn.getLineStyle().equals(EConnectionType.FLOW_MAIN)) {
+            outConnName = conn.getName();
+            IMetadataTable metadata = conn.getMetadataTable();
+            outColumns = metadata.getListColumns();
+            break;
+        }
+    }
+}
+
+boolean hasOutput = outConnName != null && outColumns != null && outColumns.size() > 0;
+%>
+
+<%if(hasOutput) {%>
+java.sql.ResultSet rs_<%=cid%> = (java.sql.ResultSet) globalMap.get("rs_<%=cid%>");
+@SuppressWarnings("unchecked")
+java.util.Map<String, Integer> colIndexMap_<%=cid%> = (java.util.Map<String, Integer>) globalMap.get("colIndexMap_<%=cid%>");
+
+if(rs_<%=cid%> != null && rs_<%=cid%>.next()) {
+    <%=outConnName%> = new <%=outConnName%>Struct();
+    
+    <%
+    for(IMetadataColumn col : outColumns) {
+        String colName = col.getLabel();
+        String colType = col.getTalendType();
+    %>
+    {
+        Integer colIdx_<%=colName%> = colIndexMap_<%=cid%>.get("<%=colName.toLowerCase()%>");
+        if(colIdx_<%=colName%> != null) {
+            try {
+                <%if(colType.equals("id_String")) {%>
+                <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getString(colIdx_<%=colName%>);
+                <%} else if(colType.equals("id_Integer")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).intValue() : null;
+                <%} else if(colType.equals("id_Long")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).longValue() : null;
+                <%} else if(colType.equals("id_Double")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).doubleValue() : null;
+                <%} else if(colType.equals("id_Float")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).floatValue() : null;
+                <%} else if(colType.equals("id_Boolean")) {%>
+                <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBoolean(colIdx_<%=colName%>);
+                if(rs_<%=cid%>.wasNull()) <%=outConnName%>.<%=colName%> = null;
+                <%} else if(colType.equals("id_Date")) {%>
+                java.sql.Timestamp ts_<%=colName%> = rs_<%=cid%>.getTimestamp(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = ts_<%=colName%> != null ? new java.util.Date(ts_<%=colName%>.getTime()) : null;
+                <%} else if(colType.equals("id_BigDecimal")) {%>
+                <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBigDecimal(colIdx_<%=colName%>);
+                <%} else if(colType.equals("id_byte[]")) {%>
+                <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBytes(colIdx_<%=colName%>);
+                <%} else if(colType.equals("id_Short")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).shortValue() : null;
+                <%} else if(colType.equals("id_Byte")) {%>
+                Object val_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = val_<%=colName%> != null ? ((Number)val_<%=colName%>).byteValue() : null;
+                <%} else {%>
+                Object rawVal_<%=colName%> = rs_<%=cid%>.getObject(colIdx_<%=colName%>);
+                <%=outConnName%>.<%=colName%> = rawVal_<%=colName%> != null ? String.valueOf(rawVal_<%=colName%>) : null;
+                <%}%>
+            } catch(Exception e_<%=colName%>) {
+                if(debug_<%=cid%>) System.err.println("[<%=cid%>] Error reading column <%=colName%>: " + e_<%=colName%>.getMessage());
+            }
+        }
+    }
+    <%}%>
+    
+    nb_line_<%=cid%>++;
+}
+<%}%>

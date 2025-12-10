@@ -1,0 +1,97 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String dbPath = ElementParameterParser.getValue(node, "__DB_PATH__");
+boolean readOnly = "true".equals(ElementParameterParser.getValue(node, "__READ_ONLY__"));
+String memoryLimit = ElementParameterParser.getValue(node, "__MEMORY_LIMIT__");
+String threads = ElementParameterParser.getValue(node, "__THREADS__");
+String tempDir = ElementParameterParser.getValue(node, "__TEMP_DIRECTORY__");
+String extensions = ElementParameterParser.getValue(node, "__EXTENSIONS__");
+boolean useHttpfs = "true".equals(ElementParameterParser.getValue(node, "__USE_HTTPFS__"));
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+%>
+
+java.sql.Connection conn_<%=cid%> = null;
+
+try {
+    Class.forName("org.duckdb.DuckDBDriver");
+    
+    String dbPathStr_<%=cid%> = <%=dbPath%>;
+    if(dbPathStr_<%=cid%> == null || dbPathStr_<%=cid%>.trim().isEmpty() || dbPathStr_<%=cid%>.equals(":memory:")) {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Connected to DuckDB in-memory database");
+    } else {
+<%if(readOnly) {%>
+        java.util.Properties props_<%=cid%> = new java.util.Properties();
+        props_<%=cid%>.setProperty("duckdb.read_only", "true");
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbPathStr_<%=cid%>, props_<%=cid%>);
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Connected to DuckDB (read-only): " + dbPathStr_<%=cid%>);
+<%} else {%>
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbPathStr_<%=cid%>);
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Connected to DuckDB: " + dbPathStr_<%=cid%>);
+<%}%>
+    }
+    
+    java.sql.Statement initSt_<%=cid%> = conn_<%=cid%>.createStatement();
+    
+    String memLimit_<%=cid%> = <%=memoryLimit%>;
+    if(memLimit_<%=cid%> != null && !memLimit_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET memory_limit='" + memLimit_<%=cid%> + "'");
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Memory limit: " + memLimit_<%=cid%>);
+    }
+    
+    int threadCount_<%=cid%> = <%=threads%>;
+    if(threadCount_<%=cid%> > 0) {
+        initSt_<%=cid%>.execute("SET threads=" + threadCount_<%=cid%>);
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Threads: " + threadCount_<%=cid%>);
+    }
+    
+    String tempDirPath_<%=cid%> = <%=tempDir%>;
+    if(tempDirPath_<%=cid%> != null && !tempDirPath_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET temp_directory='" + tempDirPath_<%=cid%> + "'");
+        if(<%=debugMode%>) System.out.println("[<%=cid%>] Temp directory: " + tempDirPath_<%=cid%>);
+    }
+
+<%if(useHttpfs) {%>
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] Loading httpfs extension...");
+    try { initSt_<%=cid%>.execute("INSTALL httpfs"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD httpfs");
+<%}%>
+
+    String extensions_<%=cid%> = <%=extensions%>;
+    if(extensions_<%=cid%> != null && !extensions_<%=cid%>.isEmpty()) {
+        for(String ext : extensions_<%=cid%>.split(",")) {
+            ext = ext.trim();
+            if(!ext.isEmpty()) {
+                if(<%=debugMode%>) System.out.println("[<%=cid%>] Loading extension: " + ext);
+                try {
+                    initSt_<%=cid%>.execute("INSTALL " + ext);
+                    initSt_<%=cid%>.execute("LOAD " + ext);
+                } catch(Exception e) {
+                    if(<%=debugMode%>) System.out.println("[<%=cid%>] Extension " + ext + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+    
+    initSt_<%=cid%>.close();
+    
+    globalMap.put("conn_<%=cid%>", conn_<%=cid%>);
+    globalMap.put("<%=cid%>_CONNECTION", conn_<%=cid%>);
+    
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] Connection stored in globalMap as 'conn_<%=cid%>'");
+
+} catch(Exception e_<%=cid%>) {
+    System.err.println("[<%=cid%>] Connection error: " + e_<%=cid%>.getMessage());
+    e_<%=cid%>.printStackTrace();
+    throw new RuntimeException("[<%=cid%>] " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+}

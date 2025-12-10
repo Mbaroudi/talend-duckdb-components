@@ -1,0 +1,104 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+		java.util.Map
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String bootstrapServers = ElementParameterParser.getValue(node, "__BOOTSTRAP_SERVERS__");
+String securityProtocol = ElementParameterParser.getValue(node, "__SECURITY_PROTOCOL__");
+String saslMechanism = ElementParameterParser.getValue(node, "__SASL_MECHANISM__");
+String saslUsername = ElementParameterParser.getValue(node, "__SASL_USERNAME__");
+String saslPassword = ElementParameterParser.getValue(node, "__SASL_PASSWORD__");
+String sslCaLocation = ElementParameterParser.getValue(node, "__SSL_CA_LOCATION__");
+String sslCertLocation = ElementParameterParser.getValue(node, "__SSL_CERT_LOCATION__");
+String sslKeyLocation = ElementParameterParser.getValue(node, "__SSL_KEY_LOCATION__");
+List<Map<String, String>> extraProps = (List<Map<String, String>>) ElementParameterParser.getObjectValue(node, "__EXTRA_KAFKA_PROPERTIES__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+%>
+
+boolean connectionOk_<%=cid%> = false;
+String errorMessage_<%=cid%> = null;
+java.sql.Connection duckConn_<%=cid%> = null;
+
+try {
+	Class.forName("org.duckdb.DuckDBDriver");
+	duckConn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+	
+	java.sql.Statement stmt_<%=cid%> = duckConn_<%=cid%>.createStatement();
+	stmt_<%=cid%>.execute("INSTALL tributary FROM community");
+	stmt_<%=cid%>.execute("LOAD tributary");
+	stmt_<%=cid%>.close();
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] DuckDB connection created with Tributary extension loaded");
+	<% } %>
+	
+	globalMap.put("conn_<%=cid%>", duckConn_<%=cid%>);
+	globalMap.put("bootstrap_servers_<%=cid%>", <%=bootstrapServers%>);
+	globalMap.put("security_protocol_<%=cid%>", "<%=securityProtocol%>");
+	
+	<% if ("SASL_PLAINTEXT".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	globalMap.put("sasl_mechanism_<%=cid%>", "<%=saslMechanism%>");
+	globalMap.put("sasl_username_<%=cid%>", <%=saslUsername%>);
+	globalMap.put("sasl_password_<%=cid%>", <%=saslPassword%>);
+	<% } else { %>
+	globalMap.put("sasl_mechanism_<%=cid%>", "");
+	globalMap.put("sasl_username_<%=cid%>", "");
+	globalMap.put("sasl_password_<%=cid%>", "");
+	<% } %>
+	
+	<% if ("SSL".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	<% if (sslCaLocation != null && !sslCaLocation.isEmpty() && !sslCaLocation.equals("\"\"")) { %>
+	globalMap.put("ssl_ca_location_<%=cid%>", <%=sslCaLocation%>);
+	<% } %>
+	<% if (sslCertLocation != null && !sslCertLocation.isEmpty() && !sslCertLocation.equals("\"\"")) { %>
+	globalMap.put("ssl_cert_location_<%=cid%>", <%=sslCertLocation%>);
+	<% } %>
+	<% if (sslKeyLocation != null && !sslKeyLocation.isEmpty() && !sslKeyLocation.equals("\"\"")) { %>
+	globalMap.put("ssl_key_location_<%=cid%>", <%=sslKeyLocation%>);
+	<% } %>
+	<% } %>
+	
+	<% if (extraProps != null && extraProps.size() > 0) { %>
+	java.util.Map<String, String> extraKafkaProps_<%=cid%> = new java.util.HashMap<>();
+	<%  for (Map<String, String> prop : extraProps) {
+			String key = prop.get("PROPERTY_KEY");
+			String value = prop.get("PROPERTY_VALUE");
+			if (key != null && !key.isEmpty()) {
+	%>
+	extraKafkaProps_<%=cid%>.put(<%=key%>, <%=value%>);
+	<%		}
+		}
+	%>
+	globalMap.put("extra_kafka_props_<%=cid%>", extraKafkaProps_<%=cid%>);
+	<% } %>
+	
+	connectionOk_<%=cid%> = true;
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Kafka connection parameters stored in globalMap");
+	System.out.println("[<%=cid%>] Bootstrap servers: " + <%=bootstrapServers%>);
+	System.out.println("[<%=cid%>] Security protocol: <%=securityProtocol%>");
+	<% } %>
+
+} catch (Exception e_<%=cid%>) {
+	connectionOk_<%=cid%> = false;
+	errorMessage_<%=cid%> = e_<%=cid%>.getMessage();
+	<% if (debugMode) { %>
+	System.err.println("[<%=cid%>] Connection error: " + e_<%=cid%>.getMessage());
+	e_<%=cid%>.printStackTrace();
+	<% } %>
+	throw new RuntimeException("[<%=cid%>] Kafka connection setup failed: " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+}
+
+globalMap.put("<%=cid%>_CONNECTION_OK", connectionOk_<%=cid%>);
+globalMap.put("<%=cid%>_ERROR_MESSAGE", errorMessage_<%=cid%>);
+

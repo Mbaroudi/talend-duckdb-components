@@ -1,0 +1,217 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+    java.util.ArrayList
+"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+boolean useExistingConn = "true".equals(ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__"));
+String connectionComponent = ElementParameterParser.getValue(node, "__CONNECTION_COMPONENT__");
+String dbPath = ElementParameterParser.getValue(node, "__DB_PATH__");
+String table = ElementParameterParser.getValue(node, "__TABLE__");
+String tableAction = ElementParameterParser.getValue(node, "__TABLE_ACTION__");
+String dataAction = ElementParameterParser.getValue(node, "__DATA_ACTION__");
+String keyColumns = ElementParameterParser.getValue(node, "__KEY_COLUMNS__");
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+boolean useBatch = "true".equals(ElementParameterParser.getValue(node, "__USE_BATCH__"));
+String batchSize = ElementParameterParser.getValue(node, "__BATCH_SIZE__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+String inConnName = null;
+List<IMetadataColumn> inColumns = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+if(inConns != null && inConns.size() > 0) {
+    IConnection conn = inConns.get(0);
+    if(conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+        inConnName = conn.getName();
+        IMetadataTable metadata = conn.getMetadataTable();
+        inColumns = metadata.getListColumns();
+    }
+}
+
+List<String> keyColList = new ArrayList<String>();
+if(keyColumns != null && !keyColumns.isEmpty()) {
+    String kc = keyColumns.replace("\"", "").trim();
+    if(!kc.isEmpty()) {
+        for(String k : kc.split(",")) {
+            keyColList.add(k.trim());
+        }
+    }
+}
+
+StringBuilder sbCreate = new StringBuilder();
+StringBuilder sbInsert = new StringBuilder();
+StringBuilder sbUpdate = new StringBuilder();
+StringBuilder sbDelete = new StringBuilder();
+
+if(inColumns != null && inColumns.size() > 0) {
+    sbCreate.append("CREATE TABLE IF NOT EXISTS ").append("\" + tableName_").append(cid).append(" + \"").append(" (");
+    sbInsert.append("INSERT INTO ").append("\" + tableName_").append(cid).append(" + \"").append(" VALUES (");
+    
+    List<String> setClauses = new ArrayList<String>();
+    List<String> whereClauses = new ArrayList<String>();
+    
+    for(int i = 0; i < inColumns.size(); i++) {
+        IMetadataColumn col = inColumns.get(i);
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        
+        String duckType = "VARCHAR";
+        if("id_Integer".equals(talendType)) duckType = "INTEGER";
+        else if("id_Long".equals(talendType)) duckType = "BIGINT";
+        else if("id_Double".equals(talendType) || "id_Float".equals(talendType)) duckType = "DOUBLE";
+        else if("id_Boolean".equals(talendType)) duckType = "BOOLEAN";
+        else if("id_Date".equals(talendType)) duckType = "TIMESTAMP";
+        else if("id_BigDecimal".equals(talendType)) duckType = "DECIMAL";
+        else if("id_byte[]".equals(talendType)) duckType = "BLOB";
+        else if("id_Short".equals(talendType)) duckType = "SMALLINT";
+        
+        sbCreate.append("\\\"").append(colName).append("\\\" ").append(duckType);
+        sbInsert.append("?");
+        
+        if(keyColList.contains(colName)) {
+            whereClauses.add("\\\"" + colName + "\\\" = ?");
+        } else {
+            setClauses.add("\\\"" + colName + "\\\" = ?");
+        }
+        
+        if(i < inColumns.size() - 1) {
+            sbCreate.append(", ");
+            sbInsert.append(", ");
+        }
+    }
+    if(keyColList.size() > 0) {
+        sbCreate.append(", PRIMARY KEY (");
+        for(int k = 0; k < keyColList.size(); k++) {
+            sbCreate.append("\\\"").append(keyColList.get(k)).append("\\\"");
+            if(k < keyColList.size() - 1) sbCreate.append(", ");
+        }
+        sbCreate.append(")");
+    }
+    sbCreate.append(")");
+    sbInsert.append(")");
+    
+    if(setClauses.size() > 0 && whereClauses.size() > 0) {
+        sbUpdate.append("UPDATE ").append("\" + tableName_").append(cid).append(" + \"");
+        sbUpdate.append(" SET ");
+        for(int i = 0; i < setClauses.size(); i++) {
+            sbUpdate.append(setClauses.get(i));
+            if(i < setClauses.size() - 1) sbUpdate.append(", ");
+        }
+        sbUpdate.append(" WHERE ");
+        for(int i = 0; i < whereClauses.size(); i++) {
+            sbUpdate.append(whereClauses.get(i));
+            if(i < whereClauses.size() - 1) sbUpdate.append(" AND ");
+        }
+    }
+    
+    if(whereClauses.size() > 0) {
+        sbDelete.append("DELETE FROM ").append("\" + tableName_").append(cid).append(" + \"");
+        sbDelete.append(" WHERE ");
+        for(int i = 0; i < whereClauses.size(); i++) {
+            sbDelete.append(whereClauses.get(i));
+            if(i < whereClauses.size() - 1) sbDelete.append(" AND ");
+        }
+    }
+}
+%>
+
+int nb_line_<%=cid%> = 0;
+int nb_line_inserted_<%=cid%> = 0;
+int nb_line_updated_<%=cid%> = 0;
+int nb_line_deleted_<%=cid%> = 0;
+int currentBatch_<%=cid%> = 0;
+int batchSize_<%=cid%> = <%=batchSize%>;
+boolean useBatch_<%=cid%> = <%=useBatch%>;
+boolean debug_<%=cid%> = <%=debugMode%>;
+
+java.sql.Connection conn_<%=cid%> = null;
+java.sql.PreparedStatement ps_<%=cid%> = null;
+java.sql.Statement stmt_<%=cid%> = null;
+boolean ownConnection_<%=cid%> = false;
+String tableName_<%=cid%> = <%=table%>;
+
+try {
+<%if(useExistingConn) {%>
+    conn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connectionComponent%>");
+    if(conn_<%=cid%> == null) {
+        throw new RuntimeException("[<%=cid%>] No connection found from <%=connectionComponent%>. Make sure tDuckDBConnection is executed first.");
+    }
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Using existing connection from <%=connectionComponent%>");
+<%} else {%>
+    Class.forName("org.duckdb.DuckDBDriver");
+    String dbPathStr_<%=cid%> = <%=dbPath%>;
+    if(dbPathStr_<%=cid%> == null || dbPathStr_<%=cid%>.trim().isEmpty() || dbPathStr_<%=cid%>.equals(":memory:")) {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+    } else {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbPathStr_<%=cid%>);
+    }
+    ownConnection_<%=cid%> = true;
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Connected to DuckDB: " + dbPathStr_<%=cid%>);
+<%}%>
+
+    stmt_<%=cid%> = conn_<%=cid%>.createStatement();
+
+<%if("DROP_CREATE".equals(tableAction)) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Dropping table: " + tableName_<%=cid%>);
+    stmt_<%=cid%>.execute("DROP TABLE IF EXISTS " + tableName_<%=cid%>);
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Creating table: " + tableName_<%=cid%>);
+    stmt_<%=cid%>.execute("<%=sbCreate.toString()%>");
+<%} else if("CREATE_IF_NOT_EXISTS".equals(tableAction)) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Creating table if not exists: " + tableName_<%=cid%>);
+    stmt_<%=cid%>.execute("<%=sbCreate.toString()%>");
+<%} else if("TRUNCATE".equals(tableAction)) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Truncating table: " + tableName_<%=cid%>);
+    stmt_<%=cid%>.execute("DELETE FROM " + tableName_<%=cid%>);
+<%}%>
+
+<%if("INSERT_OR_REPLACE".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {
+    if(keyColList.size() > 0) {%>
+    try {
+        StringBuilder uniqueIdx_<%=cid%> = new StringBuilder("CREATE UNIQUE INDEX IF NOT EXISTS idx_<%=cid%>_pk ON ");
+        uniqueIdx_<%=cid%>.append(tableName_<%=cid%>).append(" (<%for(int k=0; k<keyColList.size(); k++){%>\"<%=keyColList.get(k)%>\"<%if(k<keyColList.size()-1){%>, <%}}%>)");
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Creating unique index for ON CONFLICT: " + uniqueIdx_<%=cid%>.toString());
+        stmt_<%=cid%>.execute(uniqueIdx_<%=cid%>.toString());
+    } catch(Exception e_idx_<%=cid%>) {
+        String errMsg_<%=cid%> = e_idx_<%=cid%>.getMessage();
+        if(errMsg_<%=cid%> != null && errMsg_<%=cid%>.contains("duplicates")) {
+            throw new RuntimeException("[<%=cid%>] Cannot create unique index: table contains duplicate values in key column(s). Clean up duplicates first or use INSERT action.", e_idx_<%=cid%>);
+        }
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Index note: " + errMsg_<%=cid%>);
+    }
+<%  }
+}%>
+<%if("INSERT".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {%>
+    <%if("INSERT_OR_IGNORE".equals(dataAction)) {%>
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement("INSERT OR IGNORE INTO " + tableName_<%=cid%> + " VALUES (<%for(int i=0; i<inColumns.size(); i++){%>?<%if(i<inColumns.size()-1){%>, <%}}%>)");
+    <%} else {%>
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement("<%=sbInsert.toString()%>");
+    <%}%>
+<%} else if("INSERT_OR_REPLACE".equals(dataAction)) {%>
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement("INSERT OR REPLACE INTO " + tableName_<%=cid%> + " VALUES (<%for(int i=0; i<inColumns.size(); i++){%>?<%if(i<inColumns.size()-1){%>, <%}}%>)");
+<%} else if("UPDATE".equals(dataAction)) {%>
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement("<%=sbUpdate.toString()%>");
+<%} else if("DELETE".equals(dataAction)) {%>
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement("<%=sbDelete.toString()%>");
+<%}%>
+
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Ready to process data (action: <%=dataAction%>)");
+
+} catch(Exception e_init_<%=cid%>) {
+    System.err.println("[<%=cid%>] Initialization error: " + e_init_<%=cid%>.getMessage());
+    e_init_<%=cid%>.printStackTrace();
+<%if(dieOnError) {%>
+    throw new RuntimeException("[<%=cid%>] " + e_init_<%=cid%>.getMessage(), e_init_<%=cid%>);
+<%}%>
+}

@@ -1,0 +1,138 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+		java.util.Map
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String useExistingConnection = ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__");
+String connection = ElementParameterParser.getValue(node, "__CONNECTION__");
+String bootstrapServers = ElementParameterParser.getValue(node, "__BOOTSTRAP_SERVERS__");
+String topic = ElementParameterParser.getValue(node, "__TOPIC__");
+String securityProtocol = ElementParameterParser.getValue(node, "__SECURITY_PROTOCOL__");
+String saslMechanism = ElementParameterParser.getValue(node, "__SASL_MECHANISM__");
+String saslUsername = ElementParameterParser.getValue(node, "__SASL_USERNAME__");
+String saslPassword = ElementParameterParser.getValue(node, "__SASL_PASSWORD__");
+String messageFormat = ElementParameterParser.getValue(node, "__MESSAGE_FORMAT__");
+String keyColumn = ElementParameterParser.getValue(node, "__KEY_COLUMN__");
+String batchSize = ElementParameterParser.getValue(node, "__BATCH_SIZE__");
+String lingerMs = ElementParameterParser.getValue(node, "__LINGER_MS__");
+String acks = ElementParameterParser.getValue(node, "__ACKS__");
+String compressionType = ElementParameterParser.getValue(node, "__COMPRESSION_TYPE__");
+
+String sslCaLocation = ElementParameterParser.getValue(node, "__SSL_CA_LOCATION__");
+String sslCertLocation = ElementParameterParser.getValue(node, "__SSL_CERT_LOCATION__");
+String sslKeyLocation = ElementParameterParser.getValue(node, "__SSL_KEY_LOCATION__");
+List<Map<String, String>> extraProps = (List<Map<String, String>>) ElementParameterParser.getObjectValue(node, "__EXTRA_KAFKA_PROPERTIES__");
+String retries = ElementParameterParser.getValue(node, "__RETRIES__");
+String retryBackoffMs = ElementParameterParser.getValue(node, "__RETRY_BACKOFF_MS__");
+String bufferMemory = ElementParameterParser.getValue(node, "__BUFFER_MEMORY__");
+String maxBlockMs = ElementParameterParser.getValue(node, "__MAX_BLOCK_MS__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+String inConnName = null;
+if (inConns != null && inConns.size() > 0) {
+	IConnection conn = inConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		inConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+%>
+
+int nb_line_<%=cid%> = 0;
+String currentTopic_<%=cid%> = <%=topic%>;
+String errorMessage_<%=cid%> = null;
+
+org.apache.kafka.clients.producer.KafkaProducer<String, String> producer_<%=cid%> = null;
+
+try {
+	java.util.Properties props_<%=cid%> = new java.util.Properties();
+	
+	<% if ("true".equals(useExistingConnection)) { %>
+	String bootServers_<%=cid%> = (String) globalMap.get("bootstrap_servers_<%=connection%>");
+	props_<%=cid%>.put("bootstrap.servers", bootServers_<%=cid%>);
+	
+	String secProto_<%=cid%> = (String) globalMap.get("security_protocol_<%=connection%>");
+	if (secProto_<%=cid%> != null && !secProto_<%=cid%>.isEmpty() && !"PLAINTEXT".equals(secProto_<%=cid%>)) {
+		props_<%=cid%>.put("security.protocol", secProto_<%=cid%>);
+	}
+	
+	String saslMech_<%=cid%> = (String) globalMap.get("sasl_mechanism_<%=connection%>");
+	if (saslMech_<%=cid%> != null && !saslMech_<%=cid%>.isEmpty()) {
+		props_<%=cid%>.put("sasl.mechanism", saslMech_<%=cid%>);
+		String saslUser_<%=cid%> = (String) globalMap.get("sasl_username_<%=connection%>");
+		String saslPass_<%=cid%> = (String) globalMap.get("sasl_password_<%=connection%>");
+		String jaasConfig_<%=cid%> = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + saslUser_<%=cid%> + "\" password=\"" + saslPass_<%=cid%> + "\";";
+		props_<%=cid%>.put("sasl.jaas.config", jaasConfig_<%=cid%>);
+	}
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Using connection settings from <%=connection%>");
+	<% } %>
+	<% } else { %>
+	props_<%=cid%>.put("bootstrap.servers", <%=bootstrapServers%>);
+	
+	<% if (!"PLAINTEXT".equals(securityProtocol)) { %>
+	props_<%=cid%>.put("security.protocol", "<%=securityProtocol%>");
+	<% } %>
+	
+	<% if ("SASL_PLAINTEXT".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	props_<%=cid%>.put("sasl.mechanism", "<%=saslMechanism%>");
+	String jaasConfig_<%=cid%> = "org.apache.kafka.common.security.plain.PlainLoginModule required username=\"" + <%=saslUsername%> + "\" password=\"" + <%=saslPassword%> + "\";";
+	props_<%=cid%>.put("sasl.jaas.config", jaasConfig_<%=cid%>);
+	<% } %>
+	
+	<% if ("SSL".equals(securityProtocol) || "SASL_SSL".equals(securityProtocol)) { %>
+	<% if (sslCaLocation != null && !sslCaLocation.isEmpty() && !sslCaLocation.equals("\"\"")) { %>
+	props_<%=cid%>.put("ssl.truststore.location", <%=sslCaLocation%>);
+	<% } %>
+	<% if (sslCertLocation != null && !sslCertLocation.isEmpty() && !sslCertLocation.equals("\"\"")) { %>
+	props_<%=cid%>.put("ssl.keystore.location", <%=sslCertLocation%>);
+	<% } %>
+	<% } %>
+	<% } %>
+	
+	props_<%=cid%>.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+	props_<%=cid%>.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+	props_<%=cid%>.put("acks", "<%=acks%>");
+	props_<%=cid%>.put("batch.size", <%=batchSize%>);
+	props_<%=cid%>.put("linger.ms", <%=lingerMs%>);
+	props_<%=cid%>.put("compression.type", "<%=compressionType%>");
+	props_<%=cid%>.put("retries", <%=retries%>);
+	props_<%=cid%>.put("retry.backoff.ms", <%=retryBackoffMs%>);
+	props_<%=cid%>.put("buffer.memory", <%=bufferMemory%>);
+	props_<%=cid%>.put("max.block.ms", <%=maxBlockMs%>);
+	
+	<% if (extraProps != null && extraProps.size() > 0) { 
+		for (Map<String, String> prop : extraProps) {
+			String key = prop.get("PROPERTY_KEY");
+			String value = prop.get("PROPERTY_VALUE");
+			if (key != null && !key.isEmpty()) {
+	%>
+	props_<%=cid%>.put(<%=key%>, <%=value%>);
+	<%		}
+		}
+	} %>
+	
+	producer_<%=cid%> = new org.apache.kafka.clients.producer.KafkaProducer<>(props_<%=cid%>);
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Kafka producer initialized for topic: " + currentTopic_<%=cid%>);
+	<% } %>
+

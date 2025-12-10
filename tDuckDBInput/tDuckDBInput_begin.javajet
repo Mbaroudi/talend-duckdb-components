@@ -1,0 +1,161 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+boolean useExistingConn = "true".equals(ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__"));
+String connectionComponent = ElementParameterParser.getValue(node, "__CONNECTION_COMPONENT__");
+String dbPath = ElementParameterParser.getValue(node, "__DB_PATH__");
+String queryType = ElementParameterParser.getValue(node, "__QUERY_TYPE__");
+String tableName = ElementParameterParser.getValue(node, "__TABLE_NAME__");
+String query = ElementParameterParser.getValue(node, "__QUERY__");
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+boolean trimColumns = "true".equals(ElementParameterParser.getValue(node, "__TRIM_COLUMNS__"));
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+String outConnName = null;
+List<IMetadataColumn> outColumns = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null && outConns.size() > 0) {
+    IConnection conn = outConns.get(0);
+    if(conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+        outConnName = conn.getName();
+        IMetadataTable metadata = conn.getMetadataTable();
+        outColumns = metadata.getListColumns();
+    }
+}
+%>
+
+int nb_line_<%=cid%> = 0;
+java.sql.Connection conn_<%=cid%> = null;
+java.sql.Statement stmt_<%=cid%> = null;
+java.sql.ResultSet rs_<%=cid%> = null;
+boolean ownConnection_<%=cid%> = false;
+
+try {
+<%if(useExistingConn) {%>
+    conn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connectionComponent%>");
+    if(conn_<%=cid%> == null) {
+        throw new RuntimeException("[<%=cid%>] No connection found from <%=connectionComponent%>");
+    }
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] Using existing connection from <%=connectionComponent%>");
+<%} else {%>
+    Class.forName("org.duckdb.DuckDBDriver");
+    String dbPathStr_<%=cid%> = <%=dbPath%>;
+    if(dbPathStr_<%=cid%> == null || dbPathStr_<%=cid%>.trim().isEmpty() || dbPathStr_<%=cid%>.equals(":memory:")) {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+    } else {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbPathStr_<%=cid%>);
+    }
+    ownConnection_<%=cid%> = true;
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] Connected to DuckDB: " + dbPathStr_<%=cid%>);
+<%}%>
+
+    String query_<%=cid%> = null;
+<%if("TABLE".equals(queryType)) {%>
+    query_<%=cid%> = "SELECT * FROM " + <%=tableName%>;
+<%} else {%>
+    query_<%=cid%> = <%=query%>;
+<%}%>
+
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] Executing: " + query_<%=cid%>);
+    
+    stmt_<%=cid%> = conn_<%=cid%>.createStatement();
+    rs_<%=cid%> = stmt_<%=cid%>.executeQuery(query_<%=cid%>);
+    
+    globalMap.put("<%=cid%>_QUERY", query_<%=cid%>);
+
+    while(rs_<%=cid%>.next()) {
+<%if(outConnName != null && outColumns != null) {%>
+        <%=outConnName%> = new <%=outConnName%>Struct();
+<%  for(IMetadataColumn col : outColumns) {
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        boolean isNullable = col.isNullable();
+        String pattern = col.getPattern();
+        if(pattern == null) pattern = "yyyy-MM-dd";
+%>
+        try {
+<%      if("id_String".equals(talendType)) {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getString("<%=colName%>");
+<%          if(trimColumns) {%>
+            if(<%=outConnName%>.<%=colName%> != null) <%=outConnName%>.<%=colName%> = <%=outConnName%>.<%=colName%>.trim();
+<%          }%>
+<%      } else if("id_Integer".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).intValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getInt("<%=colName%>");
+<%          }%>
+<%      } else if("id_Long".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).longValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getLong("<%=colName%>");
+<%          }%>
+<%      } else if("id_Double".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).doubleValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getDouble("<%=colName%>");
+<%          }%>
+<%      } else if("id_Float".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).floatValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getFloat("<%=colName%>");
+<%          }%>
+<%      } else if("id_Boolean".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? (Boolean)obj_<%=colName%>_<%=cid%> : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBoolean("<%=colName%>");
+<%          }%>
+<%      } else if("id_Date".equals(talendType)) {%>
+            java.sql.Timestamp ts_<%=colName%>_<%=cid%> = rs_<%=cid%>.getTimestamp("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = ts_<%=colName%>_<%=cid%> != null ? new java.util.Date(ts_<%=colName%>_<%=cid%>.getTime()) : null;
+<%      } else if("id_BigDecimal".equals(talendType)) {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBigDecimal("<%=colName%>");
+<%      } else if("id_Short".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).shortValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getShort("<%=colName%>");
+<%          }%>
+<%      } else if("id_Byte".equals(talendType)) {%>
+<%          if(isNullable) {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? ((Number)obj_<%=colName%>_<%=cid%>).byteValue() : null;
+<%          } else {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getByte("<%=colName%>");
+<%          }%>
+<%      } else if("id_byte[]".equals(talendType)) {%>
+            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBytes("<%=colName%>");
+<%      } else {%>
+            Object obj_<%=colName%>_<%=cid%> = rs_<%=cid%>.getObject("<%=colName%>");
+            <%=outConnName%>.<%=colName%> = obj_<%=colName%>_<%=cid%> != null ? String.valueOf(obj_<%=colName%>_<%=cid%>) : null;
+<%      }%>
+        } catch(java.sql.SQLException e_<%=colName%>_<%=cid%>) {
+            if(<%=debugMode%>) System.err.println("[<%=cid%>] Warning: Column <%=colName%> - " + e_<%=colName%>_<%=cid%>.getMessage());
+        }
+<%  }%>
+        nb_line_<%=cid%>++;
+<%}%>

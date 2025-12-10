@@ -1,0 +1,34 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String connectionComponent = ElementParameterParser.getValue(node, "__CONNECTION_COMPONENT__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+%>
+
+java.sql.Connection conn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connectionComponent%>");
+
+if(conn_<%=cid%> != null) {
+    try {
+        if(!conn_<%=cid%>.isClosed()) {
+            conn_<%=cid%>.close();
+            if(<%=debugMode%>) System.out.println("[<%=cid%>] Connection from <%=connectionComponent%> closed successfully");
+        } else {
+            if(<%=debugMode%>) System.out.println("[<%=cid%>] Connection from <%=connectionComponent%> was already closed");
+        }
+    } catch(Exception e_<%=cid%>) {
+        System.err.println("[<%=cid%>] Error closing connection: " + e_<%=cid%>.getMessage());
+    }
+    globalMap.remove("conn_<%=connectionComponent%>");
+    globalMap.remove("<%=connectionComponent%>_CONNECTION");
+} else {
+    if(<%=debugMode%>) System.out.println("[<%=cid%>] No connection found for <%=connectionComponent%>");
+}

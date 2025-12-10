@@ -1,0 +1,250 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+    java.util.ArrayList
+" 
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String dataAction = ElementParameterParser.getValue(node, "__DATA_ACTION__");
+String keyColumns = ElementParameterParser.getValue(node, "__KEY_COLUMNS__");
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+
+String inConnName = null;
+List<IMetadataColumn> inColumns = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+if(inConns != null && inConns.size() > 0) {
+    IConnection conn = inConns.get(0);
+    if(conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+        inConnName = conn.getName();
+        IMetadataTable metadata = conn.getMetadataTable();
+        inColumns = metadata.getListColumns();
+    }
+}
+
+List<String> keyColList = new ArrayList<String>();
+if(keyColumns != null && !keyColumns.isEmpty()) {
+    String kc = keyColumns.replace("\"", "").trim();
+    if(!kc.isEmpty()) {
+        for(String k : kc.split(",")) {
+            keyColList.add(k.trim());
+        }
+    }
+}
+
+List<IMetadataColumn> nonKeyColumns = new ArrayList<IMetadataColumn>();
+List<IMetadataColumn> keyColumnsList = new ArrayList<IMetadataColumn>();
+if(inColumns != null) {
+    for(IMetadataColumn col : inColumns) {
+        if(keyColList.contains(col.getLabel())) {
+            keyColumnsList.add(col);
+        } else {
+            nonKeyColumns.add(col);
+        }
+    }
+}
+%>
+<%if(inConnName != null && inColumns != null) {%>
+if(<%=inConnName%> != null && ps_<%=cid%> != null) {
+    try {
+<%if("INSERT".equals(dataAction) || "INSERT_OR_REPLACE".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {%>
+<%  int idx = 1;
+    for(IMetadataColumn col : inColumns) {
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        String getter = inConnName + "." + colName;
+        boolean isNullable = col.isNullable();
+        boolean isPrimitive = "id_Integer".equals(talendType) || "id_Long".equals(talendType) || 
+                              "id_Double".equals(talendType) || "id_Float".equals(talendType) || 
+                              "id_Boolean".equals(talendType) || "id_Short".equals(talendType) || "id_Byte".equals(talendType);
+        boolean needsNullCheck = !isPrimitive;
+        if(needsNullCheck) {
+%>
+        if(<%=getter%> != null) {
+<%      }
+        if("id_Date".equals(talendType)) {%>
+            ps_<%=cid%>.setTimestamp(<%=idx%>, new java.sql.Timestamp(<%=getter%>.getTime()));
+<%      } else if("id_Integer".equals(talendType)) {%>
+            ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+<%      } else if("id_Long".equals(talendType)) {%>
+            ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+<%      } else if("id_Double".equals(talendType)) {%>
+            ps_<%=cid%>.setDouble(<%=idx%>, <%=getter%>);
+<%      } else if("id_Float".equals(talendType)) {%>
+            ps_<%=cid%>.setFloat(<%=idx%>, <%=getter%>);
+<%      } else if("id_Boolean".equals(talendType)) {%>
+            ps_<%=cid%>.setBoolean(<%=idx%>, <%=getter%>);
+<%      } else if("id_BigDecimal".equals(talendType)) {%>
+            ps_<%=cid%>.setBigDecimal(<%=idx%>, <%=getter%>);
+<%      } else if("id_Short".equals(talendType)) {%>
+            ps_<%=cid%>.setShort(<%=idx%>, <%=getter%>);
+<%      } else if("id_Byte".equals(talendType)) {%>
+            ps_<%=cid%>.setByte(<%=idx%>, <%=getter%>);
+<%      } else if("id_byte[]".equals(talendType)) {%>
+            ps_<%=cid%>.setBytes(<%=idx%>, <%=getter%>);
+<%      } else {%>
+            ps_<%=cid%>.setString(<%=idx%>, <%=getter%>);
+<%      }
+        if(needsNullCheck) {%>
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.NULL);
+        }
+<%      }
+        idx++;
+    }%>
+<%} else if("UPDATE".equals(dataAction)) {%>
+<%  int idx = 1;
+    for(IMetadataColumn col : nonKeyColumns) {
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        String getter = inConnName + "." + colName;
+        boolean isNullable = col.isNullable();
+        boolean isPrimitive = "id_Integer".equals(talendType) || "id_Long".equals(talendType) || 
+                              "id_Double".equals(talendType) || "id_Float".equals(talendType) || 
+                              "id_Boolean".equals(talendType);
+        boolean needsNullCheck = !isPrimitive;
+        if(needsNullCheck) {
+%>
+        if(<%=getter%> != null) {
+<%      }
+        if("id_Date".equals(talendType)) {%>
+            ps_<%=cid%>.setTimestamp(<%=idx%>, new java.sql.Timestamp(<%=getter%>.getTime()));
+<%      } else if("id_Integer".equals(talendType)) {%>
+            ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+<%      } else if("id_Long".equals(talendType)) {%>
+            ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+<%      } else if("id_Double".equals(talendType)) {%>
+            ps_<%=cid%>.setDouble(<%=idx%>, <%=getter%>);
+<%      } else if("id_Float".equals(talendType)) {%>
+            ps_<%=cid%>.setFloat(<%=idx%>, <%=getter%>);
+<%      } else if("id_Boolean".equals(talendType)) {%>
+            ps_<%=cid%>.setBoolean(<%=idx%>, <%=getter%>);
+<%      } else if("id_BigDecimal".equals(talendType)) {%>
+            ps_<%=cid%>.setBigDecimal(<%=idx%>, <%=getter%>);
+<%      } else {%>
+            ps_<%=cid%>.setString(<%=idx%>, <%=getter%>);
+<%      }
+        if(needsNullCheck) {%>
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.NULL);
+        }
+<%      }
+        idx++;
+    }
+    for(IMetadataColumn col : keyColumnsList) {
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        String getter = inConnName + "." + colName;
+        boolean isNullable = col.isNullable();
+        boolean isPrimitive = "id_Integer".equals(talendType) || "id_Long".equals(talendType) || 
+                              "id_Double".equals(talendType) || "id_Float".equals(talendType) || 
+                              "id_Boolean".equals(talendType);
+        boolean needsNullCheck = !isPrimitive;
+        if(needsNullCheck) {
+%>
+        if(<%=getter%> != null) {
+<%      }
+        if("id_Date".equals(talendType)) {%>
+            ps_<%=cid%>.setTimestamp(<%=idx%>, new java.sql.Timestamp(<%=getter%>.getTime()));
+<%      } else if("id_Integer".equals(talendType)) {%>
+            ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+<%      } else if("id_Long".equals(talendType)) {%>
+            ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+<%      } else if("id_Double".equals(talendType)) {%>
+            ps_<%=cid%>.setDouble(<%=idx%>, <%=getter%>);
+<%      } else if("id_Float".equals(talendType)) {%>
+            ps_<%=cid%>.setFloat(<%=idx%>, <%=getter%>);
+<%      } else if("id_Boolean".equals(talendType)) {%>
+            ps_<%=cid%>.setBoolean(<%=idx%>, <%=getter%>);
+<%      } else {%>
+            ps_<%=cid%>.setString(<%=idx%>, <%=getter%>);
+<%      }
+        if(needsNullCheck) {%>
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.NULL);
+        }
+<%      }
+        idx++;
+    }%>
+<%} else if("DELETE".equals(dataAction)) {%>
+<%  int idx = 1;
+    for(IMetadataColumn col : keyColumnsList) {
+        String colName = col.getLabel();
+        String talendType = col.getTalendType();
+        String getter = inConnName + "." + colName;
+        boolean isNullable = col.isNullable();
+        boolean isPrimitive = "id_Integer".equals(talendType) || "id_Long".equals(talendType) || 
+                              "id_Double".equals(talendType) || "id_Float".equals(talendType) || 
+                              "id_Boolean".equals(talendType);
+        boolean needsNullCheck = !isPrimitive;
+        if(needsNullCheck) {
+%>
+        if(<%=getter%> != null) {
+<%      }
+        if("id_Date".equals(talendType)) {%>
+            ps_<%=cid%>.setTimestamp(<%=idx%>, new java.sql.Timestamp(<%=getter%>.getTime()));
+<%      } else if("id_Integer".equals(talendType)) {%>
+            ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+<%      } else if("id_Long".equals(talendType)) {%>
+            ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+<%      } else {%>
+            ps_<%=cid%>.setString(<%=idx%>, <%=getter%>);
+<%      }
+        if(needsNullCheck) {%>
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.NULL);
+        }
+<%      }
+        idx++;
+    }%>
+<%}%>
+
+        if(useBatch_<%=cid%>) {
+            ps_<%=cid%>.addBatch();
+            currentBatch_<%=cid%>++;
+            if(currentBatch_<%=cid%> >= batchSize_<%=cid%>) {
+                int[] results_<%=cid%> = ps_<%=cid%>.executeBatch();
+                for(int r : results_<%=cid%>) {
+                    if(r >= 0 || r == java.sql.Statement.SUCCESS_NO_INFO) {
+<%if("INSERT".equals(dataAction) || "INSERT_OR_REPLACE".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {%>
+                        nb_line_inserted_<%=cid%>++;
+<%} else if("UPDATE".equals(dataAction)) {%>
+                        nb_line_updated_<%=cid%>++;
+<%} else if("DELETE".equals(dataAction)) {%>
+                        nb_line_deleted_<%=cid%>++;
+<%}%>
+                    }
+                }
+                if(debug_<%=cid%>) System.out.println("[<%=cid%>] Batch executed: " + currentBatch_<%=cid%> + " rows");
+                currentBatch_<%=cid%> = 0;
+            }
+        } else {
+            int result_<%=cid%> = ps_<%=cid%>.executeUpdate();
+<%if("INSERT".equals(dataAction) || "INSERT_OR_REPLACE".equals(dataAction) || "INSERT_OR_IGNORE".equals(dataAction)) {%>
+            nb_line_inserted_<%=cid%> += result_<%=cid%>;
+<%} else if("UPDATE".equals(dataAction)) {%>
+            nb_line_updated_<%=cid%> += result_<%=cid%>;
+<%} else if("DELETE".equals(dataAction)) {%>
+            nb_line_deleted_<%=cid%> += result_<%=cid%>;
+<%}%>
+        }
+        nb_line_<%=cid%>++;
+        
+    } catch(Exception e_row_<%=cid%>) {
+        System.err.println("[<%=cid%>] Row error: " + e_row_<%=cid%>.getMessage());
+<%if(dieOnError) {%>
+        throw new RuntimeException("[<%=cid%>] " + e_row_<%=cid%>.getMessage(), e_row_<%=cid%>);
+<%}%>
+    }
+}
+<%}%>

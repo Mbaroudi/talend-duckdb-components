@@ -1,0 +1,45 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String useExistingConnection = ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+%>
+
+	}
+	
+	if (rs_<%=cid%> != null) {
+		rs_<%=cid%>.close();
+	}
+	
+	<% if (!"true".equals(useExistingConnection)) { %>
+	if (duckConn_<%=cid%> != null && !duckConn_<%=cid%>.isClosed()) {
+		duckConn_<%=cid%>.close();
+	}
+	<% } %>
+	
+	<% if (debugMode) { %>
+	System.out.println("[<%=cid%>] Kafka consumption completed. Total messages: " + nb_line_<%=cid%>);
+	<% } %>
+
+} catch (Exception e_<%=cid%>) {
+	errorMessage_<%=cid%> = e_<%=cid%>.getMessage();
+	<% if (debugMode) { %>
+	System.err.println("[<%=cid%>] Error: " + e_<%=cid%>.getMessage());
+	e_<%=cid%>.printStackTrace();
+	<% } %>
+	throw new RuntimeException("[<%=cid%>] Kafka input failed: " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+}
+
+globalMap.put("<%=cid%>_NB_LINE", nb_line_<%=cid%>);
+globalMap.put("<%=cid%>_TOPIC", currentTopic_<%=cid%>);
+globalMap.put("<%=cid%>_ERROR_MESSAGE", errorMessage_<%=cid%>);
+

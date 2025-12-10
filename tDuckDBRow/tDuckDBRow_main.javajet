@@ -1,0 +1,231 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.core.model.process.EConnectionType
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+" 
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String mode = ElementParameterParser.getValue(node, "__MODE__");
+
+List<IMetadataColumn> inColumns = null;
+String inConnName = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+if(inConns != null && inConns.size() > 0) {
+    IConnection conn = inConns.get(0);
+    if(conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+        inConnName = conn.getName();
+        IMetadataTable metadata = conn.getMetadataTable();
+        inColumns = metadata.getListColumns();
+    }
+}
+
+List<IMetadataColumn> outColumns = null;
+String outConnName = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null) {
+    for(IConnection conn : outConns) {
+        if(conn.getLineStyle().equals(EConnectionType.FLOW_MAIN)) {
+            outConnName = conn.getName();
+            IMetadataTable metadata = conn.getMetadataTable();
+            outColumns = metadata.getListColumns();
+            break;
+        }
+    }
+}
+
+boolean hasInput = inConnName != null && inColumns != null && inColumns.size() > 0;
+boolean hasOutput = outConnName != null && outColumns != null;
+%>
+
+<%if(hasInput) {%>
+if(<%=inConnName%> != null && conn_<%=cid%> != null && ps_<%=cid%> != null) {
+    nb_line_input_<%=cid%>++;
+    
+    try {
+        <% 
+        int idx = 1;
+        for(IMetadataColumn col : inColumns) {
+            String getter = inConnName + "." + col.getLabel();
+            String type = col.getTalendType();
+            boolean isNullable = col.isNullable();
+            if(type.equals("id_Date")) { %>
+        if(<%=getter%> != null) {
+            ps_<%=cid%>.setTimestamp(<%=idx%>, new java.sql.Timestamp(<%=getter%>.getTime()));
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.TIMESTAMP);
+        }
+            <% } else if(type.equals("id_Integer")) { 
+                if(isNullable) { %>
+        if(<%=getter%> != null) {
+            ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.INTEGER);
+        }
+                <% } else { %>
+        ps_<%=cid%>.setInt(<%=idx%>, <%=getter%>);
+                <% }
+            } else if(type.equals("id_Long")) { 
+                if(isNullable) { %>
+        if(<%=getter%> != null) {
+            ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.BIGINT);
+        }
+                <% } else { %>
+        ps_<%=cid%>.setLong(<%=idx%>, <%=getter%>);
+                <% }
+            } else if(type.equals("id_Double") || type.equals("id_Float")) { 
+                if(isNullable) { %>
+        if(<%=getter%> != null) {
+            ps_<%=cid%>.setDouble(<%=idx%>, <%=getter%>);
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.DOUBLE);
+        }
+                <% } else { %>
+        ps_<%=cid%>.setDouble(<%=idx%>, <%=getter%>);
+                <% }
+            } else if(type.equals("id_Boolean")) { 
+                if(isNullable) { %>
+        if(<%=getter%> != null) {
+            ps_<%=cid%>.setBoolean(<%=idx%>, <%=getter%>);
+        } else {
+            ps_<%=cid%>.setNull(<%=idx%>, java.sql.Types.BOOLEAN);
+        }
+                <% } else { %>
+        ps_<%=cid%>.setBoolean(<%=idx%>, <%=getter%>);
+                <% }
+            } else if(type.equals("id_byte[]")) { %>
+        ps_<%=cid%>.setBytes(<%=idx%>, <%=getter%>);
+            <% } else { %>
+        ps_<%=cid%>.setObject(<%=idx%>, <%=getter%>);
+            <% }
+            idx++;
+        } %>
+        
+        ps_<%=cid%>.addBatch();
+        currentBatchSize_<%=cid%>++;
+        
+        if(currentBatchSize_<%=cid%> >= batchSize_<%=cid%>) {
+            if(debug_<%=cid%>) System.out.println("[<%=cid%>] Processing batch " + (nb_batches_<%=cid%> + 1) + " (" + currentBatchSize_<%=cid%> + " rows)...");
+            
+            ps_<%=cid%>.executeBatch();
+            nb_batches_<%=cid%>++;
+            
+            java.sql.Statement stBatch_<%=cid%> = conn_<%=cid%>.createStatement();
+            
+            String preSql_<%=cid%> = (String) globalMap.get("preSql_<%=cid%>");
+            if(preSql_<%=cid%> != null && !preSql_<%=cid%>.trim().isEmpty() && !preSql_<%=cid%>.trim().startsWith("--")) {
+                for(String stmt : preSql_<%=cid%>.split(";")) {
+                    stmt = stmt.trim();
+                    if(!stmt.isEmpty() && !stmt.startsWith("--")) {
+                        if(logSql_<%=cid%>) System.out.println("[<%=cid%>] PRE: " + stmt);
+                        stBatch_<%=cid%>.execute(stmt);
+                    }
+                }
+            }
+            
+<%if("QUERY".equals(mode) || "TRANSFORM".equals(mode)) {%>
+            String sqlQuery_<%=cid%> = (String) globalMap.get("sqlQuery_<%=cid%>");
+            if(sqlQuery_<%=cid%> != null && !sqlQuery_<%=cid%>.trim().isEmpty() && !sqlQuery_<%=cid%>.trim().startsWith("--")) {
+                if(logSql_<%=cid%>) System.out.println("[<%=cid%>] QUERY: " + sqlQuery_<%=cid%>);
+                
+    <%if(hasOutput) {%>
+                java.sql.ResultSet rs_<%=cid%> = stBatch_<%=cid%>.executeQuery(sqlQuery_<%=cid%>);
+                java.sql.ResultSetMetaData rsMeta_<%=cid%> = rs_<%=cid%>.getMetaData();
+                int colCount_<%=cid%> = rsMeta_<%=cid%>.getColumnCount();
+                
+                java.util.Map<String, Integer> colIndexMap_<%=cid%> = new java.util.HashMap();
+                for(int i = 1; i <= colCount_<%=cid%>; i++) {
+                    colIndexMap_<%=cid%>.put(rsMeta_<%=cid%>.getColumnName(i).toLowerCase(), i);
+                }
+                
+                while(rs_<%=cid%>.next()) {
+                    <%=outConnName%> = new <%=outConnName%>Struct();
+                    <%
+                    for(IMetadataColumn col : outColumns) {
+                        String colName = col.getLabel();
+                        String colType = col.getTalendType();
+                    %>
+                    {
+                        Integer colIdx = colIndexMap_<%=cid%>.get("<%=colName.toLowerCase()%>");
+                        if(colIdx != null) {
+                            <%if(colType.equals("id_String")) {%>
+                            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getString(colIdx);
+                            <%} else if(colType.equals("id_Integer")) {%>
+                            Object val = rs_<%=cid%>.getObject(colIdx);
+                            <%=outConnName%>.<%=colName%> = val != null ? ((Number)val).intValue() : null;
+                            <%} else if(colType.equals("id_Long")) {%>
+                            Object val = rs_<%=cid%>.getObject(colIdx);
+                            <%=outConnName%>.<%=colName%> = val != null ? ((Number)val).longValue() : null;
+                            <%} else if(colType.equals("id_Double")) {%>
+                            Object val = rs_<%=cid%>.getObject(colIdx);
+                            <%=outConnName%>.<%=colName%> = val != null ? ((Number)val).doubleValue() : null;
+                            <%} else if(colType.equals("id_Float")) {%>
+                            Object val = rs_<%=cid%>.getObject(colIdx);
+                            <%=outConnName%>.<%=colName%> = val != null ? ((Number)val).floatValue() : null;
+                            <%} else if(colType.equals("id_Boolean")) {%>
+                            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBoolean(colIdx);
+                            if(rs_<%=cid%>.wasNull()) <%=outConnName%>.<%=colName%> = null;
+                            <%} else if(colType.equals("id_Date")) {%>
+                            java.sql.Timestamp ts = rs_<%=cid%>.getTimestamp(colIdx);
+                            <%=outConnName%>.<%=colName%> = ts != null ? new java.util.Date(ts.getTime()) : null;
+                            <%} else if(colType.equals("id_BigDecimal")) {%>
+                            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBigDecimal(colIdx);
+                            <%} else if(colType.equals("id_byte[]")) {%>
+                            <%=outConnName%>.<%=colName%> = rs_<%=cid%>.getBytes(colIdx);
+                            <%} else {%>
+                            Object rawVal = rs_<%=cid%>.getObject(colIdx);
+                            <%=outConnName%>.<%=colName%> = rawVal != null ? String.valueOf(rawVal) : null;
+                            <%}%>
+                        }
+                    }
+                    <%}%>
+                    nb_line_output_<%=cid%>++;
+                }
+                rs_<%=cid%>.close();
+    <%} else {%>
+                stBatch_<%=cid%>.execute(sqlQuery_<%=cid%>);
+    <%}%>
+            }
+<%}%>
+            
+            String postSql_<%=cid%> = (String) globalMap.get("postSql_<%=cid%>");
+            if(postSql_<%=cid%> != null && !postSql_<%=cid%>.trim().isEmpty() && !postSql_<%=cid%>.trim().startsWith("--")) {
+                for(String stmt : postSql_<%=cid%>.split(";")) {
+                    stmt = stmt.trim();
+                    if(!stmt.isEmpty() && !stmt.startsWith("--")) {
+                        if(logSql_<%=cid%>) System.out.println("[<%=cid%>] POST: " + stmt);
+                        stBatch_<%=cid%>.execute(stmt);
+                    }
+                }
+            }
+            
+            stBatch_<%=cid%>.execute("DELETE FROM INPUT_BUFFER");
+            stBatch_<%=cid%>.close();
+            
+            currentBatchSize_<%=cid%> = 0;
+            
+            if(debug_<%=cid%>) System.out.println("[<%=cid%>] Batch done. Output: " + nb_line_output_<%=cid%>);
+        }
+        
+    } catch(Exception e_<%=cid%>) {
+        nb_errors_<%=cid%>++;
+        System.err.println("[<%=cid%>] Row error: " + e_<%=cid%>.getMessage());
+        if(dieOnError_<%=cid%>) {
+            throw new RuntimeException("[<%=cid%>] " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+        }
+    }
+}
+<%} else {%>
+<%}%>

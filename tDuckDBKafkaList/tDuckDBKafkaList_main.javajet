@@ -1,0 +1,140 @@
+<%@ jet
+	imports="
+		org.talend.core.model.process.INode
+		org.talend.core.model.process.ElementParameterParser
+		org.talend.core.model.metadata.IMetadataTable
+		org.talend.core.model.metadata.IMetadataColumn
+		org.talend.core.model.process.IConnection
+		org.talend.core.model.process.IConnectionCategory
+		org.talend.designer.codegen.config.CodeGeneratorArgument
+		java.util.List
+	"
+%>
+<%
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode) codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String outputType = ElementParameterParser.getValue(node, "__OUTPUT_TYPE__");
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+
+List<IMetadataColumn> columns = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+String outConnName = null;
+if (outConns != null && outConns.size() > 0) {
+	IConnection conn = outConns.get(0);
+	if (conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+		outConnName = conn.getName();
+		IMetadataTable metadata = conn.getMetadataTable();
+		if (metadata != null) {
+			columns = metadata.getListColumns();
+		}
+	}
+}
+%>
+
+	while (rs_<%=cid%>.next()) {
+		String brokers_<%=cid%> = rs_<%=cid%>.getString("brokers");
+		String topics_<%=cid%> = rs_<%=cid%>.getString("topics");
+		
+		<% if (debugMode) { %>
+		System.out.println("[<%=cid%>] Brokers: " + brokers_<%=cid%>);
+		System.out.println("[<%=cid%>] Topics: " + topics_<%=cid%>);
+		<% } %>
+		
+		<% if ("TOPICS".equals(outputType) || "ALL".equals(outputType)) { %>
+		if (topics_<%=cid%> != null && !topics_<%=cid%>.isEmpty()) {
+			org.json.JSONArray topicsArray_<%=cid%> = new org.json.JSONArray(topics_<%=cid%>);
+			for (int i = 0; i < topicsArray_<%=cid%>.length(); i++) {
+				org.json.JSONObject topicObj_<%=cid%> = topicsArray_<%=cid%>.getJSONObject(i);
+				String topicName_<%=cid%> = topicObj_<%=cid%>.optString("name", "");
+				int partitionCount_<%=cid%> = topicObj_<%=cid%>.optInt("partition_count", 0);
+				
+				nb_topics_<%=cid%>++;
+				
+				<% if (outConnName != null && columns != null) { %>
+				<%=outConnName%> = new <%=outConnName%>Struct();
+				<%
+				for (IMetadataColumn col : columns) {
+					String colName = col.getLabel();
+					if (colName.equals("type")) {
+				%>
+				<%=outConnName%>.<%=colName%> = "TOPIC";
+				<%
+					} else if (colName.equals("name") || colName.equals("topic_name")) {
+				%>
+				<%=outConnName%>.<%=colName%> = topicName_<%=cid%>;
+				<%
+					} else if (colName.equals("partition_count") || colName.equals("partitions")) {
+				%>
+				<%=outConnName%>.<%=colName%> = partitionCount_<%=cid%>;
+				<%
+					} else if (colName.equals("details")) {
+				%>
+				<%=outConnName%>.<%=colName%> = topicObj_<%=cid%>.toString();
+				<%
+					}
+				}
+				%>
+				<% } %>
+				
+				<% if (debugMode) { %>
+				System.out.println("[<%=cid%>] Topic: " + topicName_<%=cid%> + " (" + partitionCount_<%=cid%> + " partitions)");
+				<% } %>
+			}
+		}
+		<% } %>
+		
+		<% if ("BROKERS".equals(outputType) || "ALL".equals(outputType)) { %>
+		if (brokers_<%=cid%> != null && !brokers_<%=cid%>.isEmpty()) {
+			org.json.JSONArray brokersArray_<%=cid%> = new org.json.JSONArray(brokers_<%=cid%>);
+			for (int i = 0; i < brokersArray_<%=cid%>.length(); i++) {
+				org.json.JSONObject brokerObj_<%=cid%> = brokersArray_<%=cid%>.getJSONObject(i);
+				int brokerId_<%=cid%> = brokerObj_<%=cid%>.optInt("id", -1);
+				String brokerHost_<%=cid%> = brokerObj_<%=cid%>.optString("host", "");
+				int brokerPort_<%=cid%> = brokerObj_<%=cid%>.optInt("port", 0);
+				
+				nb_brokers_<%=cid%>++;
+				
+				<% if (outConnName != null && columns != null) { %>
+				<%=outConnName%> = new <%=outConnName%>Struct();
+				<%
+				for (IMetadataColumn col : columns) {
+					String colName = col.getLabel();
+					if (colName.equals("type")) {
+				%>
+				<%=outConnName%>.<%=colName%> = "BROKER";
+				<%
+					} else if (colName.equals("name") || colName.equals("broker_name")) {
+				%>
+				<%=outConnName%>.<%=colName%> = brokerHost_<%=cid%> + ":" + brokerPort_<%=cid%>;
+				<%
+					} else if (colName.equals("broker_id")) {
+				%>
+				<%=outConnName%>.<%=colName%> = brokerId_<%=cid%>;
+				<%
+					} else if (colName.equals("host")) {
+				%>
+				<%=outConnName%>.<%=colName%> = brokerHost_<%=cid%>;
+				<%
+					} else if (colName.equals("port")) {
+				%>
+				<%=outConnName%>.<%=colName%> = brokerPort_<%=cid%>;
+				<%
+					} else if (colName.equals("details")) {
+				%>
+				<%=outConnName%>.<%=colName%> = brokerObj_<%=cid%>.toString();
+				<%
+					}
+				}
+				%>
+				<% } %>
+				
+				<% if (debugMode) { %>
+				System.out.println("[<%=cid%>] Broker: " + brokerHost_<%=cid%> + ":" + brokerPort_<%=cid%> + " (ID: " + brokerId_<%=cid%> + ")");
+				<% } %>
+			}
+		}
+		<% } %>
+	}
+

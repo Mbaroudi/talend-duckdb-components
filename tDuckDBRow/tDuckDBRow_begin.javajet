@@ -1,0 +1,360 @@
+<%@ jet 
+imports="
+    org.talend.core.model.process.INode 
+    org.talend.core.model.process.ElementParameterParser 
+    org.talend.core.model.metadata.IMetadataTable 
+    org.talend.core.model.metadata.IMetadataColumn 
+    org.talend.core.model.process.IConnection
+    org.talend.core.model.process.IConnectionCategory
+    org.talend.core.model.process.EConnectionType
+    org.talend.designer.codegen.config.CodeGeneratorArgument
+    java.util.List
+    java.util.Base64
+" 
+%>
+<% 
+CodeGeneratorArgument codeGenArgument = (CodeGeneratorArgument) argument;
+INode node = (INode)codeGenArgument.getArgument();
+String cid = node.getUniqueName();
+
+String mode = ElementParameterParser.getValue(node, "__MODE__");
+boolean useExistingConn = "true".equals(ElementParameterParser.getValue(node, "__USE_EXISTING_CONNECTION__"));
+String connectionComponent = ElementParameterParser.getValue(node, "__CONNECTION_COMPONENT__");
+String databasePath = ElementParameterParser.getValue(node, "__DATABASE_PATH__");
+
+boolean useCloudStorage = "true".equals(ElementParameterParser.getValue(node, "__USE_CLOUD_STORAGE__"));
+String cloudProvider = ElementParameterParser.getValue(node, "__CLOUD_PROVIDER__");
+String s3AccessKey = ElementParameterParser.getValue(node, "__S3_ACCESS_KEY__");
+String s3SecretKey = ElementParameterParser.getValue(node, "__S3_SECRET_KEY__");
+String s3Region = ElementParameterParser.getValue(node, "__S3_REGION__");
+String s3Endpoint = ElementParameterParser.getValue(node, "__S3_ENDPOINT__");
+String azureConnStr = ElementParameterParser.getValue(node, "__AZURE_CONNECTION_STRING__");
+String azureAccount = ElementParameterParser.getValue(node, "__AZURE_ACCOUNT_NAME__");
+String gcsKeyFile = ElementParameterParser.getValue(node, "__GCS_KEY_FILE__");
+
+String sqlQuery = ElementParameterParser.getValue(node, "__SQL_QUERY__");
+String filePath = ElementParameterParser.getValue(node, "__FILE_PATH__");
+String fileFormat = ElementParameterParser.getValue(node, "__FILE_FORMAT__");
+String csvDelimiter = ElementParameterParser.getValue(node, "__CSV_DELIMITER__");
+boolean csvHeader = "true".equals(ElementParameterParser.getValue(node, "__CSV_HEADER__"));
+
+String exportPath = ElementParameterParser.getValue(node, "__EXPORT_PATH__");
+String exportQuery = ElementParameterParser.getValue(node, "__EXPORT_QUERY__");
+String exportPartitionBy = ElementParameterParser.getValue(node, "__EXPORT_PARTITION_BY__");
+
+String batchSize = ElementParameterParser.getValue(node, "__BATCH_SIZE__");
+boolean dieOnError = "true".equals(ElementParameterParser.getValue(node, "__DIE_ON_ERROR__"));
+
+String memoryLimit = ElementParameterParser.getValue(node, "__MEMORY_LIMIT__");
+String threads = ElementParameterParser.getValue(node, "__THREADS__");
+String tempDir = ElementParameterParser.getValue(node, "__TEMP_DIRECTORY__");
+String extensions = ElementParameterParser.getValue(node, "__EXTENSIONS__");
+String initSql = ElementParameterParser.getValue(node, "__INIT_SQL__");
+String preSql = ElementParameterParser.getValue(node, "__PRE_SQL__");
+String postSql = ElementParameterParser.getValue(node, "__POST_SQL__");
+String cleanupSql = ElementParameterParser.getValue(node, "__CLEANUP_SQL__");
+
+boolean useHttpfs = "true".equals(ElementParameterParser.getValue(node, "__USE_HTTPFS__"));
+boolean useSpatial = "true".equals(ElementParameterParser.getValue(node, "__USE_SPATIAL__"));
+boolean useFts = "true".equals(ElementParameterParser.getValue(node, "__USE_FTS__"));
+boolean useIce = "true".equals(ElementParameterParser.getValue(node, "__USE_ICE__"));
+boolean useDelta = "true".equals(ElementParameterParser.getValue(node, "__USE_DELTA__"));
+
+boolean debugMode = "true".equals(ElementParameterParser.getValue(node, "__DEBUG_MODE__"));
+boolean logSql = "true".equals(ElementParameterParser.getValue(node, "__LOG_SQL__"));
+boolean preserveDb = "true".equals(ElementParameterParser.getValue(node, "__PRESERVE_DB__"));
+
+List<IMetadataColumn> inColumns = null;
+String inConnName = null;
+List<? extends IConnection> inConns = node.getIncomingConnections();
+if(inConns != null && inConns.size() > 0) {
+    IConnection conn = inConns.get(0);
+    if(conn.getLineStyle().hasConnectionCategory(IConnectionCategory.DATA)) {
+        inConnName = conn.getName();
+        IMetadataTable metadata = conn.getMetadataTable();
+        inColumns = metadata.getListColumns();
+    }
+}
+
+List<IMetadataColumn> outColumns = null;
+String outConnName = null;
+List<? extends IConnection> outConns = node.getOutgoingSortedConnections();
+if(outConns != null) {
+    for(IConnection conn : outConns) {
+        if(conn.getLineStyle().equals(EConnectionType.FLOW_MAIN)) {
+            outConnName = conn.getName();
+            IMetadataTable metadata = conn.getMetadataTable();
+            outColumns = metadata.getListColumns();
+            break;
+        }
+    }
+}
+
+StringBuilder sbCreate = new StringBuilder("CREATE TABLE IF NOT EXISTS INPUT_BUFFER (");
+StringBuilder sbInsert = new StringBuilder("INSERT INTO INPUT_BUFFER VALUES (");
+if(inColumns != null && inColumns.size() > 0) {
+    for(int i = 0; i < inColumns.size(); i++) {
+        IMetadataColumn col = inColumns.get(i);
+        String type = "VARCHAR";
+        String tType = col.getTalendType();
+        if(tType.equals("id_Integer")) type = "INTEGER";
+        else if(tType.equals("id_Long") || tType.equals("id_BigDecimal")) type = "BIGINT";
+        else if(tType.equals("id_Date")) type = "TIMESTAMP";
+        else if(tType.equals("id_Double") || tType.equals("id_Float")) type = "DOUBLE";
+        else if(tType.equals("id_Boolean")) type = "BOOLEAN";
+        else if(tType.equals("id_byte[]")) type = "BLOB";
+        
+        sbCreate.append("\"").append(col.getLabel()).append("\" ").append(type);
+        sbInsert.append("?");
+        if(i < inColumns.size() - 1) { 
+            sbCreate.append(", "); 
+            sbInsert.append(", "); 
+        }
+    }
+}
+sbCreate.append(")");
+sbInsert.append(")");
+
+String b64Create = Base64.getEncoder().encodeToString(sbCreate.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64Insert = Base64.getEncoder().encodeToString(sbInsert.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+if(sqlQuery == null) sqlQuery = "";
+if(initSql == null) initSql = "";
+if(preSql == null) preSql = "";
+if(postSql == null) postSql = "";
+if(cleanupSql == null) cleanupSql = "";
+if(exportQuery == null) exportQuery = "";
+String b64Query = Base64.getEncoder().encodeToString(sqlQuery.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64Init = Base64.getEncoder().encodeToString(initSql.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64Pre = Base64.getEncoder().encodeToString(preSql.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64Post = Base64.getEncoder().encodeToString(postSql.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64Cleanup = Base64.getEncoder().encodeToString(cleanupSql.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+String b64ExportQuery = Base64.getEncoder().encodeToString(exportQuery.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+%>
+
+long startTime_<%=cid%> = System.currentTimeMillis();
+int nb_line_input_<%=cid%> = 0;
+int nb_line_output_<%=cid%> = 0;
+int nb_batches_<%=cid%> = 0;
+int nb_files_loaded_<%=cid%> = 0;
+int nb_files_exported_<%=cid%> = 0;
+int nb_errors_<%=cid%> = 0;
+
+int batchSize_<%=cid%> = <%=batchSize%>;
+int currentBatchSize_<%=cid%> = 0;
+boolean debug_<%=cid%> = <%=debugMode%>;
+boolean logSql_<%=cid%> = <%=logSql%>;
+boolean dieOnError_<%=cid%> = <%=dieOnError%>;
+String mode_<%=cid%> = "<%=mode%>";
+
+java.sql.Connection conn_<%=cid%> = null;
+java.sql.PreparedStatement ps_<%=cid%> = null;
+boolean ownConnection_<%=cid%> = false;
+
+try {
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Initializing tDuckDBRow (mode: " + mode_<%=cid%> + ")...");
+    
+<%if(useExistingConn) {%>
+    conn_<%=cid%> = (java.sql.Connection) globalMap.get("conn_<%=connectionComponent%>");
+    if(conn_<%=cid%> == null) {
+        throw new RuntimeException("[<%=cid%>] No connection found from <%=connectionComponent%>. Make sure tDuckDBConnection is executed first.");
+    }
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Using existing connection from <%=connectionComponent%>");
+<%} else {%>
+    Class.forName("org.duckdb.DuckDBDriver");
+    
+    String dbPath_<%=cid%> = <%=databasePath%>;
+    if(dbPath_<%=cid%> == null || dbPath_<%=cid%>.trim().isEmpty() || dbPath_<%=cid%>.equals(":memory:")) {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:");
+    } else {
+        conn_<%=cid%> = java.sql.DriverManager.getConnection("jdbc:duckdb:" + dbPath_<%=cid%>);
+    }
+    ownConnection_<%=cid%> = true;
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Connected to DuckDB: " + dbPath_<%=cid%>);
+<%}%>
+    java.sql.Statement initSt_<%=cid%> = conn_<%=cid%>.createStatement();
+    
+    String memLimit_<%=cid%> = <%=memoryLimit%>;
+    if(memLimit_<%=cid%> != null && !memLimit_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET memory_limit='" + memLimit_<%=cid%> + "'");
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Memory limit: " + memLimit_<%=cid%>);
+    }
+    
+    int threadCount_<%=cid%> = <%=threads%>;
+    if(threadCount_<%=cid%> > 0) {
+        initSt_<%=cid%>.execute("SET threads=" + threadCount_<%=cid%>);
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Threads: " + threadCount_<%=cid%>);
+    }
+    
+    String tempDirPath_<%=cid%> = <%=tempDir%>;
+    if(tempDirPath_<%=cid%> != null && !tempDirPath_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET temp_directory='" + tempDirPath_<%=cid%> + "'");
+    }
+
+<%if(useHttpfs || useCloudStorage) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading httpfs extension...");
+    try { initSt_<%=cid%>.execute("INSTALL httpfs"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD httpfs");
+<%}%>
+
+<%if(useSpatial) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading spatial extension...");
+    try { initSt_<%=cid%>.execute("INSTALL spatial"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD spatial");
+<%}%>
+
+<%if(useFts) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading fts extension...");
+    try { initSt_<%=cid%>.execute("INSTALL fts"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD fts");
+<%}%>
+
+<%if(useIce) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading iceberg extension...");
+    try { initSt_<%=cid%>.execute("INSTALL iceberg"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD iceberg");
+<%}%>
+
+<%if(useDelta) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading delta extension...");
+    try { initSt_<%=cid%>.execute("INSTALL delta"); } catch(Exception e) {}
+    initSt_<%=cid%>.execute("LOAD delta");
+<%}%>
+
+    String extensions_<%=cid%> = <%=extensions%>;
+    if(extensions_<%=cid%> != null && !extensions_<%=cid%>.isEmpty()) {
+        for(String ext : extensions_<%=cid%>.split(",")) {
+            ext = ext.trim();
+            if(!ext.isEmpty()) {
+                if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading extension: " + ext);
+                try {
+                    initSt_<%=cid%>.execute("INSTALL " + ext);
+                    initSt_<%=cid%>.execute("LOAD " + ext);
+                } catch(Exception e) {
+                    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Extension " + ext + ": " + e.getMessage());
+                }
+            }
+        }
+    }
+
+<%if(useCloudStorage) {%>
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Configuring cloud storage (<%=cloudProvider%>)...");
+    
+    <%if("S3".equals(cloudProvider) || "R2".equals(cloudProvider)) {%>
+    String s3Key_<%=cid%> = <%=s3AccessKey%>;
+    String s3Secret_<%=cid%> = <%=s3SecretKey%>;
+    String s3Region_<%=cid%> = <%=s3Region%>;
+    String s3Endpoint_<%=cid%> = <%=s3Endpoint%>;
+    
+    if(s3Key_<%=cid%> != null && !s3Key_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET s3_access_key_id='" + s3Key_<%=cid%> + "'");
+        initSt_<%=cid%>.execute("SET s3_secret_access_key='" + s3Secret_<%=cid%> + "'");
+    }
+    if(s3Region_<%=cid%> != null && !s3Region_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET s3_region='" + s3Region_<%=cid%> + "'");
+    }
+    if(s3Endpoint_<%=cid%> != null && !s3Endpoint_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET s3_endpoint='" + s3Endpoint_<%=cid%> + "'");
+        <%if("R2".equals(cloudProvider)) {%>
+        initSt_<%=cid%>.execute("SET s3_url_style='path'");
+        <%}%>
+    }
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] S3 configured (region: " + s3Region_<%=cid%> + ")");
+    <%}%>
+    
+    <%if("AZURE".equals(cloudProvider)) {%>
+    String azureConn_<%=cid%> = <%=azureConnStr%>;
+    String azureAcct_<%=cid%> = <%=azureAccount%>;
+    
+    if(azureConn_<%=cid%> != null && !azureConn_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET azure_storage_connection_string='" + azureConn_<%=cid%> + "'");
+    }
+    if(azureAcct_<%=cid%> != null && !azureAcct_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET azure_account_name='" + azureAcct_<%=cid%> + "'");
+    }
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Azure Blob configured");
+    <%}%>
+    
+    <%if("GCS".equals(cloudProvider)) {%>
+    String gcsKey_<%=cid%> = <%=gcsKeyFile%>;
+    if(gcsKey_<%=cid%> != null && !gcsKey_<%=cid%>.isEmpty()) {
+        initSt_<%=cid%>.execute("SET gcs_keyfile='" + gcsKey_<%=cid%> + "'");
+    }
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] GCS configured");
+    <%}%>
+<%}%>
+
+    String initSqlDecoded_<%=cid%> = new String(java.util.Base64.getDecoder().decode("<%=b64Init%>"), java.nio.charset.StandardCharsets.UTF_8);
+    initSqlDecoded_<%=cid%> = initSqlDecoded_<%=cid%>.replace("\"\"", "").trim();
+    while(initSqlDecoded_<%=cid%>.startsWith("\"") && initSqlDecoded_<%=cid%>.endsWith("\"") && initSqlDecoded_<%=cid%>.length() > 1) {
+        initSqlDecoded_<%=cid%> = initSqlDecoded_<%=cid%>.substring(1, initSqlDecoded_<%=cid%>.length()-1).trim();
+    }
+    if(initSqlDecoded_<%=cid%> != null && !initSqlDecoded_<%=cid%>.isEmpty() && !initSqlDecoded_<%=cid%>.startsWith("--")) {
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Executing INIT_SQL...");
+        for(String stmt : initSqlDecoded_<%=cid%>.split(";")) {
+            stmt = stmt.trim();
+            if(!stmt.isEmpty() && !stmt.startsWith("--")) {
+                if(logSql_<%=cid%>) System.out.println("[<%=cid%>] " + stmt);
+                initSt_<%=cid%>.execute(stmt);
+            }
+        }
+    }
+
+<%if("LOAD_FILE".equals(mode)) {%>
+    String filePath_<%=cid%> = <%=filePath%>;
+    String fileFormat_<%=cid%> = "<%=fileFormat%>";
+    
+    if(filePath_<%=cid%> != null && !filePath_<%=cid%>.isEmpty()) {
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] Loading file: " + filePath_<%=cid%> + " (" + fileFormat_<%=cid%> + ")");
+        
+        StringBuilder loadSql_<%=cid%> = new StringBuilder("CREATE OR REPLACE TABLE loaded_data AS SELECT * FROM ");
+        
+        if("PARQUET".equals(fileFormat_<%=cid%>)) {
+            loadSql_<%=cid%>.append("read_parquet('").append(filePath_<%=cid%>).append("')");
+        } else if("CSV".equals(fileFormat_<%=cid%>)) {
+            loadSql_<%=cid%>.append("read_csv('").append(filePath_<%=cid%>).append("'");
+            loadSql_<%=cid%>.append(", header=<%=csvHeader%>");
+            loadSql_<%=cid%>.append(", delim='").append(<%=csvDelimiter%>).append("'");
+            loadSql_<%=cid%>.append(", auto_detect=true)");
+        } else if("JSON".equals(fileFormat_<%=cid%>)) {
+            loadSql_<%=cid%>.append("read_json('").append(filePath_<%=cid%>).append("', auto_detect=true)");
+        } else if("NDJSON".equals(fileFormat_<%=cid%>)) {
+            loadSql_<%=cid%>.append("read_json('").append(filePath_<%=cid%>).append("', format='newline_delimited', auto_detect=true)");
+        }
+        
+        if(logSql_<%=cid%>) System.out.println("[<%=cid%>] " + loadSql_<%=cid%>.toString());
+        initSt_<%=cid%>.execute(loadSql_<%=cid%>.toString());
+        nb_files_loaded_<%=cid%>++;
+        
+        if(debug_<%=cid%>) System.out.println("[<%=cid%>] File loaded successfully");
+    }
+<%}%>
+
+<%if(inConnName != null && inColumns != null && inColumns.size() > 0) {%>
+    String sqlCreate_<%=cid%> = new String(java.util.Base64.getDecoder().decode("<%=b64Create%>"), java.nio.charset.StandardCharsets.UTF_8);
+    if(logSql_<%=cid%>) System.out.println("[<%=cid%>] " + sqlCreate_<%=cid%>);
+    initSt_<%=cid%>.execute(sqlCreate_<%=cid%>);
+    
+    String sqlInsert_<%=cid%> = new String(java.util.Base64.getDecoder().decode("<%=b64Insert%>"), java.nio.charset.StandardCharsets.UTF_8);
+    ps_<%=cid%> = conn_<%=cid%>.prepareStatement(sqlInsert_<%=cid%>);
+<%}%>
+
+    initSt_<%=cid%>.close();
+    
+    globalMap.put("conn_<%=cid%>", conn_<%=cid%>);
+    globalMap.put("ps_<%=cid%>", ps_<%=cid%>);
+    globalMap.put("sqlQuery_<%=cid%>", new String(java.util.Base64.getDecoder().decode("<%=b64Query%>"), java.nio.charset.StandardCharsets.UTF_8));
+    globalMap.put("preSql_<%=cid%>", new String(java.util.Base64.getDecoder().decode("<%=b64Pre%>"), java.nio.charset.StandardCharsets.UTF_8));
+    globalMap.put("postSql_<%=cid%>", new String(java.util.Base64.getDecoder().decode("<%=b64Post%>"), java.nio.charset.StandardCharsets.UTF_8));
+    globalMap.put("cleanupSql_<%=cid%>", new String(java.util.Base64.getDecoder().decode("<%=b64Cleanup%>"), java.nio.charset.StandardCharsets.UTF_8));
+    globalMap.put("exportQuery_<%=cid%>", new String(java.util.Base64.getDecoder().decode("<%=b64ExportQuery%>"), java.nio.charset.StandardCharsets.UTF_8));
+    
+    if(debug_<%=cid%>) System.out.println("[<%=cid%>] Initialization complete.");
+
+} catch(Exception e_<%=cid%>) {
+    nb_errors_<%=cid%>++;
+    System.err.println("[<%=cid%>] Initialization error: " + e_<%=cid%>.getMessage());
+    e_<%=cid%>.printStackTrace();
+    if(dieOnError_<%=cid%>) {
+        throw new RuntimeException("[<%=cid%>] " + e_<%=cid%>.getMessage(), e_<%=cid%>);
+    }
+}
