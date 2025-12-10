@@ -138,3 +138,4 @@ Created for the Talend community.
 
 **Note**: These components are community-contributed and not officially supported by Talend or DuckDB Labs.
 # talend-duckdb-components
+# talend-duckdb-components
