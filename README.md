@@ -33,7 +33,9 @@ DuckDB is an embedded analytical database that excels at:
 |-----------|-------------|
 | **tDuckDBRestInput** | Query REST APIs and load directly into DuckDB |
 
-### Kafka Integration
+### Kafka Integration (Beta)
+
+> **Note**: Ces composants Kafka ne sont pas encore testés en production. Vos retours sont les bienvenus !
 
 | Component | Description |
 |-----------|-------------|
@@ -44,10 +46,20 @@ DuckDB is an embedded analytical database that excels at:
 
 ## Installation
 
-### Method 1: Manual Installation
+### Method 1: Via Talend Preferences (Recommended)
+
+1. Download/clone this repository to a local folder (e.g., `Downloaded` in your Exchange folder)
+2. Open **Talend Studio**
+3. Go to **Window > Preferences > Talend > Components**
+4. In **User component folder**, add the path to your downloaded folder
+5. Click **Apply and Close**
+6. Restart Talend Studio
+7. Components appear in the **Databases > DuckDB** palette category
+
+### Method 2: Manual Installation
 
 1. Download the component folders
-2. Copy to your Talend custom components directory:
+2. Copy each component folder to your Talend custom components directory:
    ```
    # Windows
    %USERPROFILE%\TOS_DI-[version]\plugins\org.talend.designer.components.localprovider_[version]\components\
@@ -57,13 +69,6 @@ DuckDB is an embedded analytical database that excels at:
    ```
 3. Restart Talend Studio
 4. Components appear in the **Databases > DuckDB** palette category
-
-### Method 2: Using Install Script
-
-```bash
-chmod +x install.sh
-./install.sh /path/to/TOS_DI-[version]
-```
 
 ## Quick Start
 
@@ -137,5 +142,3 @@ Created for the Talend community.
 ---
 
 **Note**: These components are community-contributed and not officially supported by Talend or DuckDB Labs.
-# talend-duckdb-components
-# talend-duckdb-components
